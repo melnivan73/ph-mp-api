@@ -2,8 +2,6 @@
 const express = require('express');
 const cors = require('cors');
 const { google } = require('googleapis');
-const { sendOrderToAdmin, sendOrderConfirmation } = require('./bot');
-const crypto = require('crypto');
 
 const app = express();
 const PORT = process.env.PORT || 3000;
@@ -314,32 +312,78 @@ app.post('/api/order', async (req, res) => {
       });
     }
 
+    const TELEGRAM_BOT_TOKEN = process.env.TELEGRAM_BOT_TOKEN;
+    const ADMIN_TELEGRAM_ID = process.env.ADMIN_TELEGRAM_ID;
+
+    if (!TELEGRAM_BOT_TOKEN) {
+      throw new Error('TELEGRAM_BOT_TOKEN не налаштовано');
+    }
+
     // Получаем актуальный курс TON
     const tonRate = await getTonRate();
     
     // Расчёт суммы
     const totalUah = phones.reduce((sum, p) => sum + p.price, 0);
-    const totalTon = Math.round((totalUah * 0.95) / tonRate); // -5% скидка для TON
+    const totalTonWithDiscount = Math.round((totalUah * 0.95) / tonRate); // -5% скидка
+    const totalUahWithDiscount = Math.round(totalUah * 0.95);
+    const totalTon = Math.round(totalUah / tonRate);
 
-    // Генерируем уникальный ID заказа
-    const orderId = crypto.randomBytes(8).toString('hex');
+    // Форматирование списка номеров
+    const phonesList = phones.map(p => 
+      `${p.number} - ${p.price.toLocaleString('uk-UA')} грн.`
+    ).join('\n');
 
-    // Данные заказа
-    const orderData = {
-      orderId,
-      phones,
-      totalUah,
-      totalTon,
-      tonRate,
-      username: username || 'невідомий',
-      userId
-    };
+    // Сообщение клиенту
+    const clientMessage = `🛒 Ваше замовлення
 
-    // Отправляем заказ админу с кнопками
-    await sendOrderToAdmin(orderData);
+📱 Номер:
+${phonesList}
 
-    // Отправляем подтверждение клиенту
-    await sendOrderConfirmation(userId, phones, totalUah, totalTon);
+💰 Загальна сума: ${totalUah.toLocaleString('uk-UA')} грн.
+або
+💎 з додатковою знижкою (-5%) у TON: ${totalTonWithDiscount} TON (приблизно ${totalUahWithDiscount.toLocaleString('uk-UA')} грн.)
+
+👤 Замовник: @${username || 'невідомий'}
+
+Зачекайте, будь ласка, відповіді менеджера,
+перевіряємо наявність номерів на ваше замовлення...`;
+
+    // Сообщение администратору
+    const adminMessage = `🛒 Нове замовлення!
+
+📱 Номер:
+${phonesList}
+
+💰 Загальна сума: ${totalUah.toLocaleString('uk-UA')} грн.
+💎 У TON: ${totalTon} TON
+
+👤 Замовник: @${username || 'невідомий'} (ID: ${userId})`;
+
+    // Отправка сообщения клиенту
+    if (userId) {
+      await fetch(`https://api.telegram.org/bot${TELEGRAM_BOT_TOKEN}/sendMessage`, {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({
+          chat_id: userId,
+          text: clientMessage,
+          parse_mode: 'HTML'
+        })
+      });
+    }
+
+    // Отправка сообщения администратору
+    if (ADMIN_TELEGRAM_ID) {
+      await fetch(`https://api.telegram.org/bot${TELEGRAM_BOT_TOKEN}/sendMessage`, {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({
+          chat_id: ADMIN_TELEGRAM_ID,
+          text: adminMessage,
+          parse_mode: 'HTML'
+        })
+      });
+    }
 
     res.json({
       success: true,
