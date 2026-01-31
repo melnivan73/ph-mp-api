@@ -2,6 +2,8 @@
 const express = require('express');
 const cors = require('cors');
 const { google } = require('googleapis');
+const TelegramBot = require('node-telegram-bot-api');
+const crypto = require('crypto');
 
 const app = express();
 const PORT = process.env.PORT || 3000;
@@ -19,6 +21,14 @@ const SHEET_NAME = 'work';
 const RANGE = `${SHEET_NAME}!D2:E`;
 
 const API_KEY = process.env.GOOGLE_API_KEY;
+
+// Telegram Bot (без polling для Vercel)
+const BOT_TOKEN = process.env.TELEGRAM_BOT_TOKEN;
+const ADMIN_ID = process.env.ADMIN_TELEGRAM_ID;
+const bot = new TelegramBot(BOT_TOKEN);
+
+// Хранилище заказов (в продакшене использовать БД)
+const activeOrders = new Map();
 
 // Кэш курса TON
 let tonRateCache = {
@@ -94,17 +104,13 @@ async function getPhoneNumbers() {
       const rawNumber = row[0].toString().trim();
       const formattedNumber = formatPhoneNumber(rawNumber);
       const price = parseInt(row[1]) || 0;
-      const category = getCategoryByPrice(price);
 
       return {
         id: index + 1,
         number: formattedNumber,
         rawNumber: rawNumber,
         operator: getOperatorByNumber(rawNumber),
-        category: category,
-        price: price,
-        description: generateDescription(rawNumber, price),
-        features: generateFeatures(rawNumber, price)
+        price: price
       };
     }).filter(phone => phone !== null);
 
@@ -146,86 +152,23 @@ function getOperatorByNumber(number) {
   const code = digits.startsWith('380') ? digits.substr(3, 2) : digits.substr(1, 2);
   
   const operators = {
-    '39': 'Kyivstar',
     '67': 'Kyivstar',
     '68': 'Kyivstar',
     '96': 'Kyivstar',
     '97': 'Kyivstar',
     '98': 'Kyivstar',
+    '77': 'Kyivstar',
     '50': 'Vodafone',
     '66': 'Vodafone',
     '95': 'Vodafone',
     '99': 'Vodafone',
+    '75': 'Vodafone',
     '63': 'lifecell',
     '73': 'lifecell',
-    '93': 'lifecell',
-    '91': 'Trimob',
-    '92': 'Peoplenet'
+    '93': 'lifecell'
   };
   
   return operators[code] || 'Інший оператор';
-}
-
-function getCategoryByPrice(price) {
-  if (price >= 15000) return 'vip';
-  if (price >= 8000) return 'gold';
-  if (price >= 3000) return 'silver';
-  return 'bronze';
-}
-
-function generateDescription(number, price) {
-  const digits = number.replace(/\D/g, '');
-  const lastDigits = digits.slice(-7);
-  
-  if (/(\d)\1{3,}/.test(lastDigits)) {
-    return 'Красивий номер з повторюваними цифрами';
-  }
-  
-  if (hasSequence(lastDigits)) {
-    return 'Номер з послідовністю цифр';
-  }
-  
-  if (/(\d)\1{2}$/.test(lastDigits)) {
-    return 'Номер з однаковими останніми цифрами';
-  }
-  
-  if (price >= 15000) {
-    return 'Ексклюзивний VIP номер';
-  }
-  
-  if (price >= 8000) {
-    return 'Преміум номер для бізнесу';
-  }
-  
-  return 'Гарний номер телефону';
-}
-
-function hasSequence(digits) {
-  for (let i = 0; i < digits.length - 2; i++) {
-    const a = parseInt(digits[i]);
-    const b = parseInt(digits[i + 1]);
-    const c = parseInt(digits[i + 2]);
-    
-    if (b === a + 1 && c === b + 1) return true;
-    if (b === a - 1 && c === b - 1) return true;
-  }
-  return false;
-}
-
-function generateFeatures(number, price) {
-  const features = [];
-  const digits = number.replace(/\D/g, '');
-  const lastDigits = digits.slice(-7);
-  
-  if (price >= 15000) features.push('VIP');
-  if (price >= 8000) features.push('Преміум');
-  if (/(\d)\1{3,}/.test(lastDigits)) features.push('Повторювані цифри');
-  if (hasSequence(lastDigits)) features.push('Послідовність');
-  if (/(\d)\1{2}$/.test(lastDigits)) features.push('Красива кінцівка');
-  if (price < 3000) features.push('Доступна ціна');
-  features.push('Легко запам\'ятати');
-  
-  return features.slice(0, 3);
 }
 
 // ========================================
@@ -292,15 +235,10 @@ app.get('/api/ton-rate', async (req, res) => {
   }
 });
 
-app.get('/api/health', (req, res) => {
-  res.json({
-    success: true,
-    message: 'API працює',
-    timestamp: new Date().toISOString()
-  });
-});
+// ========================================
+// СИСТЕМА ЗАКАЗОВ
+// ========================================
 
-// Отправка заказа через Telegram Bot
 app.post('/api/order', async (req, res) => {
   try {
     const { phones, username, userId } = req.body;
@@ -312,21 +250,28 @@ app.post('/api/order', async (req, res) => {
       });
     }
 
-    const TELEGRAM_BOT_TOKEN = process.env.TELEGRAM_BOT_TOKEN;
-    const ADMIN_TELEGRAM_ID = process.env.ADMIN_TELEGRAM_ID;
-
-    if (!TELEGRAM_BOT_TOKEN) {
-      throw new Error('TELEGRAM_BOT_TOKEN не налаштовано');
-    }
-
     // Получаем актуальный курс TON
     const tonRate = await getTonRate();
     
     // Расчёт суммы
     const totalUah = phones.reduce((sum, p) => sum + p.price, 0);
-    const totalTonWithDiscount = Math.round((totalUah * 0.95) / tonRate); // -5% скидка
+    const totalTonWithDiscount = Math.round((totalUah * 0.95) / tonRate);
     const totalUahWithDiscount = Math.round(totalUah * 0.95);
-    const totalTon = Math.round(totalUah / tonRate);
+
+    // Генерируем уникальный ID заказа
+    const orderId = crypto.randomBytes(8).toString('hex');
+
+    // Сохраняем заказ
+    activeOrders.set(orderId, {
+      orderId,
+      phones,
+      totalUah,
+      totalTonWithDiscount,
+      totalUahWithDiscount,
+      tonRate,
+      username: username || 'невідомий',
+      userId
+    });
 
     // Форматирование списка номеров
     const phonesList = phones.map(p => 
@@ -348,42 +293,31 @@ ${phonesList}
 Зачекайте, будь ласка, відповіді менеджера,
 перевіряємо наявність номерів на ваше замовлення...`;
 
-    // Сообщение администратору
+    // Сообщение админу с кнопками
     const adminMessage = `🛒 Нове замовлення!
 
 📱 Номер:
 ${phonesList}
 
 💰 Загальна сума: ${totalUah.toLocaleString('uk-UA')} грн.
-💎 У TON: ${totalTon} TON
+💎 У TON: ${totalTonWithDiscount} TON
 
 👤 Замовник: @${username || 'невідомий'} (ID: ${userId})`;
 
-    // Отправка сообщения клиенту
-    if (userId) {
-      await fetch(`https://api.telegram.org/bot${TELEGRAM_BOT_TOKEN}/sendMessage`, {
-        method: 'POST',
-        headers: { 'Content-Type': 'application/json' },
-        body: JSON.stringify({
-          chat_id: userId,
-          text: clientMessage,
-          parse_mode: 'HTML'
-        })
-      });
-    }
+    // Отправка клиенту
+    await bot.sendMessage(userId, clientMessage);
 
-    // Отправка сообщения администратору
-    if (ADMIN_TELEGRAM_ID) {
-      await fetch(`https://api.telegram.org/bot${TELEGRAM_BOT_TOKEN}/sendMessage`, {
-        method: 'POST',
-        headers: { 'Content-Type': 'application/json' },
-        body: JSON.stringify({
-          chat_id: ADMIN_TELEGRAM_ID,
-          text: adminMessage,
-          parse_mode: 'HTML'
-        })
-      });
-    }
+    // Отправка админу с кнопками
+    await bot.sendMessage(ADMIN_ID, adminMessage, {
+      reply_markup: {
+        inline_keyboard: [
+          [
+            { text: '✅ В наявності', callback_data: `available_${orderId}` },
+            { text: '❌ Номера немає', callback_data: `unavailable_${orderId}` }
+          ]
+        ]
+      }
+    });
 
     res.json({
       success: true,
@@ -400,6 +334,214 @@ ${phonesList}
   }
 });
 
+// ========================================
+// ОБРАБОТКА CALLBACK ОТ TELEGRAM
+// ========================================
+
+app.post('/api/telegram-webhook', async (req, res) => {
+  try {
+    const update = req.body;
+
+    // Обработка callback кнопок
+    if (update.callback_query) {
+      const callbackQuery = update.callback_query;
+      const data = callbackQuery.data;
+      const [action, orderId] = data.split('_');
+      const order = activeOrders.get(orderId);
+
+      if (!order) {
+        await bot.answerCallbackQuery(callbackQuery.id, {
+          text: 'Замовлення не знайдено',
+          show_alert: true
+        });
+        return res.json({ ok: true });
+      }
+
+      // АДМИН НАЖАЛ "В НАЯВНОСТІ"
+      if (action === 'available') {
+        // Убираем кнопки у админа
+        await bot.editMessageReplyMarkup({ inline_keyboard: [] }, {
+          chat_id: ADMIN_ID,
+          message_id: callbackQuery.message.message_id
+        });
+
+        await bot.sendMessage(ADMIN_ID, '✅ Відправлено запит клієнту');
+
+        // Отправляем клиенту упрощённое сообщение с кнопкой
+        const phonesList = order.phones.map(p => p.number).join(', ');
+        
+        const formMessage = `✅ Номер ${phonesList} в наявності!
+
+Повідомте, будь ласка, дані для відправки Новою поштою.
+Натисніть кнопку нижче для введення даних:`;
+
+        await bot.sendMessage(order.userId, formMessage, {
+          reply_markup: {
+            inline_keyboard: [
+              [{ text: '📝 Заповнити дані', callback_data: `form_${orderId}` }]
+            ]
+          }
+        });
+
+        await bot.answerCallbackQuery(callbackQuery.id);
+      }
+      
+      // АДМИН НАЖАЛ "НОМЕРА НЕМАЄ"
+      else if (action === 'unavailable') {
+        await bot.editMessageReplyMarkup({ inline_keyboard: [] }, {
+          chat_id: ADMIN_ID,
+          message_id: callbackQuery.message.message_id
+        });
+
+        await bot.sendMessage(ADMIN_ID, '❌ Відправлено повідомлення клієнту');
+
+        await bot.sendMessage(order.userId, 
+          '❌ Номер зараз недоступний, з вами зв\'яжеться менеджер для уточнення інформації'
+        );
+
+        activeOrders.delete(orderId);
+        await bot.answerCallbackQuery(callbackQuery.id);
+      }
+
+      // КЛИЕНТ НАЖАЛ "ЗАПОВНИТИ ДАНІ"
+      else if (action === 'form') {
+        await bot.sendMessage(order.userId, 
+          '📝 Введіть дані для відправки у форматі:\n\n' +
+          'Телефон:\n' +
+          'Прізвище:\n' +
+          'Ім\'я:\n' +
+          'Місто:\n' +
+          'Область:\n' +
+          'Район:\n' +
+          'Склад НП №:\n\n' +
+          'Вставте текст вище і заповніть після кожного двокрапки'
+        );
+
+        order.waitingForData = true;
+        activeOrders.set(orderId, order);
+
+        await bot.answerCallbackQuery(callbackQuery.id);
+      }
+
+      // КЛИЕНТ ВЫБРАЛ СПОСОБ ОПЛАТЫ
+      else if (action === 'payment') {
+        const paymentType = data.split('_')[2];
+
+        if (paymentType === 'cash') {
+          await bot.editMessageReplyMarkup({ inline_keyboard: [] }, {
+            chat_id: order.userId,
+            message_id: callbackQuery.message.message_id
+          });
+
+          const deliveryData = order.deliveryData || {};
+          const phonesList = order.phones.map(p => p.number).join(', ');
+          
+          const adminMessage = `📦 Замовлення підтверджено (Оплата при отриманні)
+
+📱 Номер: ${phonesList}
+💰 Сума: ${order.totalUah.toLocaleString('uk-UA')} грн.
+
+👤 Замовник: @${order.username} (ID: ${order.userId})
+
+📮 Дані для відправки:
+${Object.entries(deliveryData).map(([key, value]) => `${key}: ${value}`).join('\n')}`;
+
+          await bot.sendMessage(ADMIN_ID, adminMessage);
+
+          await bot.sendMessage(order.userId, 
+            '✅ Ваше замовлення прийняте.\n\n' +
+            'З вами можуть додатково зв\'язатися для уточнення даних, що відсутні (невірні)'
+          );
+
+          activeOrders.delete(orderId);
+        } 
+        else if (paymentType === 'ton') {
+          await bot.sendMessage(order.userId, 
+            '💎 Оплата через TON буде доступна найближчим часом.\n\n' +
+            'Будь ласка, оберіть "Оплата при отриманні"'
+          );
+        }
+
+        await bot.answerCallbackQuery(callbackQuery.id);
+      }
+    }
+
+    // Обработка текстовых сообщений (данные от клиента)
+    if (update.message && update.message.text) {
+      const userId = update.message.from.id;
+      const text = update.message.text;
+
+      // Игнорируем команды
+      if (text.startsWith('/')) {
+        return res.json({ ok: true });
+      }
+
+      // Ищем активный заказ
+      let userOrder = null;
+      let userOrderId = null;
+
+      for (const [orderId, order] of activeOrders.entries()) {
+        if (order.userId === userId && order.waitingForData) {
+          userOrder = order;
+          userOrderId = orderId;
+          break;
+        }
+      }
+
+      if (userOrder) {
+        const lines = text.split('\n').filter(line => line.trim());
+        const deliveryData = {};
+
+        lines.forEach(line => {
+          const [key, ...valueParts] = line.split(':');
+          if (key && valueParts.length > 0) {
+            deliveryData[key.trim()] = valueParts.join(':').trim();
+          }
+        });
+
+        userOrder.deliveryData = deliveryData;
+        userOrder.waitingForData = false;
+        activeOrders.set(userOrderId, userOrder);
+
+        const phonesList = userOrder.phones.map(p => p.number).join(', ');
+
+        const paymentMessage = `✅ Дані збережено!
+
+📱 Номер: ${phonesList}
+💰 Сума: ${userOrder.totalUah.toLocaleString('uk-UA')} грн.
+
+Виберіть спосіб оплати:`;
+
+        await bot.sendMessage(userId, paymentMessage, {
+          reply_markup: {
+            inline_keyboard: [
+              [
+                { text: '💵 Оплата при отриманні', callback_data: `payment_${userOrderId}_cash` }
+              ],
+              [
+                { text: `💎 Оплатити в TON -5% (${userOrder.totalTonWithDiscount} TON)`, callback_data: `payment_${userOrderId}_ton` }
+              ]
+            ]
+          }
+        });
+      }
+    }
+
+    res.json({ ok: true });
+  } catch (error) {
+    console.error('Webhook error:', error);
+    res.json({ ok: true });
+  }
+});
+
+app.get('/api/health', (req, res) => {
+  res.json({
+    success: true,
+    message: 'API працює',
+    timestamp: new Date().toISOString()
+  });
+});
+
 app.get('/', (req, res) => {
   res.json({
     message: 'Phone Marketplace API',
@@ -409,6 +551,7 @@ app.get('/', (req, res) => {
       'GET /api/phones/:id': 'Отримати номер за ID',
       'GET /api/ton-rate': 'Отримати курс TON',
       'POST /api/order': 'Відправити замовлення',
+      'POST /api/telegram-webhook': 'Telegram webhook',
       'GET /api/health': 'Перевірка роботи'
     }
   });
