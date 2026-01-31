@@ -335,6 +335,82 @@ ${phonesList}
 });
 
 // ========================================
+// ПРИЕМ ДАННЫХ ДОСТАВКИ ИЗ ФОРМЫ
+// ========================================
+
+app.post('/api/delivery-data', async (req, res) => {
+  try {
+    const { orderId, phone, lastName, firstName, city, region, district, warehouse } = req.body;
+    
+    if (!orderId) {
+      return res.status(400).json({
+        success: false,
+        error: 'ID замовлення не вказано'
+      });
+    }
+
+    const order = activeOrders.get(orderId);
+    
+    if (!order) {
+      return res.status(404).json({
+        success: false,
+        error: 'Замовлення не знайдено'
+      });
+    }
+
+    // Сохраняем данные доставки
+    const deliveryData = {
+      'Телефон': phone,
+      'Прізвище': lastName,
+      'Ім\'я': firstName,
+      'Місто': city,
+      'Область': region,
+      'Район': district || '-',
+      'Склад НП №': warehouse
+    };
+
+    order.deliveryData = deliveryData;
+    activeOrders.set(orderId, order);
+
+    // Отправляем клиенту кнопки выбора оплаты
+    const phonesList = order.phones.map(p => p.number).join(', ');
+
+    const paymentMessage = `✅ Дані збережено!
+
+📱 Номер: ${phonesList}
+💰 Сума: ${order.totalUah.toLocaleString('uk-UA')} грн.
+
+Виберіть спосіб оплати:`;
+
+    await bot.sendMessage(order.userId, paymentMessage, {
+      reply_markup: {
+        inline_keyboard: [
+          [
+            { text: '💵 Оплата при отриманні', callback_data: `payment_${orderId}_cash` }
+          ],
+          [
+            { text: `💎 Оплатити в TON -5% (${order.totalTonWithDiscount} TON)`, callback_data: `payment_${orderId}_ton` }
+          ]
+        ]
+      }
+    });
+
+    res.json({
+      success: true,
+      message: 'Дані збережено'
+    });
+
+  } catch (error) {
+    console.error('Помилка збереження даних:', error);
+    res.status(500).json({
+      success: false,
+      error: 'Помилка збереження даних',
+      message: error.message
+    });
+  }
+});
+
+// ========================================
 // ОБРАБОТКА CALLBACK ОТ TELEGRAM
 // ========================================
 
@@ -367,18 +443,21 @@ app.post('/api/telegram-webhook', async (req, res) => {
 
         await bot.sendMessage(ADMIN_ID, '✅ Відправлено запит клієнту');
 
-        // Отправляем клиенту упрощённое сообщение с кнопкой
+        // Отправляем клиенту кнопку с формой
         const phonesList = order.phones.map(p => p.number).join(', ');
         
         const formMessage = `✅ Номер ${phonesList} в наявності!
 
 Повідомте, будь ласка, дані для відправки Новою поштою.
-Натисніть кнопку нижче для введення даних:`;
+Натисніть кнопку нижче для заповнення форми:`;
 
         await bot.sendMessage(order.userId, formMessage, {
           reply_markup: {
             inline_keyboard: [
-              [{ text: '📝 Заповнити дані', callback_data: `form_${orderId}` }]
+              [{ 
+                text: '📝 Заповнити дані', 
+                web_app: { url: `https://ph-mp.vercel.app/delivery-form.html?orderId=${orderId}` }
+              }]
             ]
           }
         });
@@ -400,26 +479,6 @@ app.post('/api/telegram-webhook', async (req, res) => {
         );
 
         activeOrders.delete(orderId);
-        await bot.answerCallbackQuery(callbackQuery.id);
-      }
-
-      // КЛИЕНТ НАЖАЛ "ЗАПОВНИТИ ДАНІ"
-      else if (action === 'form') {
-        await bot.sendMessage(order.userId, 
-          '📝 Введіть дані для відправки у форматі:\n\n' +
-          'Телефон:\n' +
-          'Прізвище:\n' +
-          'Ім\'я:\n' +
-          'Місто:\n' +
-          'Область:\n' +
-          'Район:\n' +
-          'Склад НП №:\n\n' +
-          'Вставте текст вище і заповніть після кожного двокрапки'
-        );
-
-        order.waitingForData = true;
-        activeOrders.set(orderId, order);
-
         await bot.answerCallbackQuery(callbackQuery.id);
       }
 
@@ -463,67 +522,6 @@ ${Object.entries(deliveryData).map(([key, value]) => `${key}: ${value}`).join('\
         }
 
         await bot.answerCallbackQuery(callbackQuery.id);
-      }
-    }
-
-    // Обработка текстовых сообщений (данные от клиента)
-    if (update.message && update.message.text) {
-      const userId = update.message.from.id;
-      const text = update.message.text;
-
-      // Игнорируем команды
-      if (text.startsWith('/')) {
-        return res.json({ ok: true });
-      }
-
-      // Ищем активный заказ
-      let userOrder = null;
-      let userOrderId = null;
-
-      for (const [orderId, order] of activeOrders.entries()) {
-        if (order.userId === userId && order.waitingForData) {
-          userOrder = order;
-          userOrderId = orderId;
-          break;
-        }
-      }
-
-      if (userOrder) {
-        const lines = text.split('\n').filter(line => line.trim());
-        const deliveryData = {};
-
-        lines.forEach(line => {
-          const [key, ...valueParts] = line.split(':');
-          if (key && valueParts.length > 0) {
-            deliveryData[key.trim()] = valueParts.join(':').trim();
-          }
-        });
-
-        userOrder.deliveryData = deliveryData;
-        userOrder.waitingForData = false;
-        activeOrders.set(userOrderId, userOrder);
-
-        const phonesList = userOrder.phones.map(p => p.number).join(', ');
-
-        const paymentMessage = `✅ Дані збережено!
-
-📱 Номер: ${phonesList}
-💰 Сума: ${userOrder.totalUah.toLocaleString('uk-UA')} грн.
-
-Виберіть спосіб оплати:`;
-
-        await bot.sendMessage(userId, paymentMessage, {
-          reply_markup: {
-            inline_keyboard: [
-              [
-                { text: '💵 Оплата при отриманні', callback_data: `payment_${userOrderId}_cash` }
-              ],
-              [
-                { text: `💎 Оплатити в TON -5% (${userOrder.totalTonWithDiscount} TON)`, callback_data: `payment_${userOrderId}_ton` }
-              ]
-            ]
-          }
-        });
       }
     }
 
