@@ -735,7 +735,7 @@ ${Object.entries(deliveryData).map(([key, value]) => `${key}: ${value}`).join('\
   }
 });
 
-// Отмена заказа
+// Отмена оплаты TON (возврат к выбору способа оплаты)
 app.post('/api/cancel-order', async (req, res) => {
   try {
     const { orderId } = req.body;
@@ -748,12 +748,34 @@ app.post('/api/cancel-order', async (req, res) => {
       });
     }
 
+    // Уведомляем админа
     await bot.sendMessage(ADMIN_ID,
-      `❌ Клієнт @${order.username} (ID: ${order.userId}) скасував замовлення TON`
+      `⚠️ Клієнт @${order.username} (ID: ${order.userId}) відмінив оплату TON`
     );
 
-    activeOrders.delete(orderId);
+    // НЕ удаляем заказ! Только очищаем данные TON транзакции
     tonTransactions.delete(orderId);
+
+    // Отправляем клиенту снова выбор способа оплаты
+    const phonesList = order.phones.map(p => p.number).join(', ');
+    
+    const paymentMessage = `📱 Номер: ${phonesList}
+💰 Сума: ${order.totalUah.toLocaleString('uk-UA')} грн.
+
+Виберіть спосіб оплати:`;
+
+    await bot.sendMessage(order.userId, paymentMessage, {
+      reply_markup: {
+        inline_keyboard: [
+          [
+            { text: '💵 Оплата при отриманні', callback_data: `payment_${orderId}_cash` }
+          ],
+          [
+            { text: `💎 Оплатити в TON -5% (${order.totalTonWithDiscount} TON)`, callback_data: `payment_${orderId}_ton` }
+          ]
+        ]
+      }
+    });
 
     res.json({ success: true });
   } catch (error) {
