@@ -1,7 +1,7 @@
 {
   "url": "https://ph-mp.vercel.app",
-  "name": "Gold Numbers Shop",
-  "iconUrl": "https://ph-mp.vercel.app/icon-256.png",
-  "termsOfUseUrl": "https://ph-mp.vercel.app",
-  "privacyPolicyUrl": "https://ph-mp.vercel.app"
+  "name": "Gold Numbers UA Shop",
+  "iconUrl": "https://ph-mp.vercel.app/icon-512.png",
+  "termsOfUseUrl": "https://ph-mp.vercel.app/terms",
+  "privacyPolicyUrl": "https://ph-mp.vercel.app/privacy"
 }
