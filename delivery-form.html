@@ -1,0 +1,640 @@
+<!DOCTYPE html>
+<html lang="uk">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>Оформлення замовлення</title>
+    <script src="https://telegram.org/js/telegram-web-app.js"></script>
+    <script src="https://unpkg.com/@tonconnect/ui@latest/dist/tonconnect-ui.min.js"></script>
+    <style>
+        * {
+            margin: 0;
+            padding: 0;
+            box-sizing: border-box;
+        }
+
+        body {
+            font-family: -apple-system, BlinkMacSystemFont, 'Segoe UI', Roboto, Oxygen, Ubuntu, Cantarell, sans-serif;
+            background: #17212b;
+            color: #ffffff;
+            padding: 20px;
+            padding-bottom: 100px;
+        }
+
+        .container {
+            max-width: 600px;
+            margin: 0 auto;
+        }
+
+        .header {
+            margin-bottom: 30px;
+        }
+
+        .header h1 {
+            font-size: 24px;
+            margin-bottom: 10px;
+        }
+
+        .phone-info {
+            background: rgba(255, 255, 255, 0.1);
+            padding: 15px;
+            border-radius: 12px;
+            margin-bottom: 20px;
+        }
+
+        .phone-number {
+            font-size: 20px;
+            font-weight: bold;
+            color: #667eea;
+            margin-bottom: 5px;
+        }
+
+        .price-info {
+            display: flex;
+            justify-content: space-between;
+            align-items: center;
+            margin-top: 10px;
+        }
+
+        .price-uah {
+            font-size: 18px;
+            font-weight: bold;
+        }
+
+        .price-ton {
+            font-size: 14px;
+            color: #aaa;
+        }
+
+        .form-section {
+            background: rgba(255, 255, 255, 0.05);
+            padding: 20px;
+            border-radius: 12px;
+            margin-bottom: 20px;
+        }
+
+        .form-section h2 {
+            font-size: 18px;
+            margin-bottom: 15px;
+            color: #667eea;
+        }
+
+        .form-group {
+            margin-bottom: 15px;
+        }
+
+        .form-group label {
+            display: block;
+            margin-bottom: 5px;
+            font-size: 14px;
+            color: #aaa;
+        }
+
+        .form-group input,
+        .form-group select {
+            width: 100%;
+            padding: 12px;
+            border: 1px solid rgba(255, 255, 255, 0.1);
+            border-radius: 8px;
+            font-size: 16px;
+            background: rgba(255, 255, 255, 0.05);
+            color: #ffffff;
+        }
+
+        .form-group input::placeholder {
+            color: #666;
+        }
+
+        .autocomplete-results {
+            position: absolute;
+            top: 100%;
+            left: 0;
+            right: 0;
+            background: #2a3a4a;
+            border-radius: 8px;
+            margin-top: 5px;
+            max-height: 200px;
+            overflow-y: auto;
+            z-index: 1000;
+            box-shadow: 0 4px 12px rgba(0,0,0,0.3);
+        }
+
+        .autocomplete-item {
+            padding: 12px;
+            cursor: pointer;
+            border-bottom: 1px solid rgba(255, 255, 255, 0.1);
+        }
+
+        .autocomplete-item:hover {
+            background: rgba(102, 126, 234, 0.2);
+        }
+
+        .autocomplete-item:last-child {
+            border-bottom: none;
+        }
+
+        .payment-method {
+            background: rgba(255, 255, 255, 0.05);
+            padding: 20px;
+            border-radius: 12px;
+            margin-bottom: 15px;
+            cursor: pointer;
+            border: 2px solid transparent;
+            transition: all 0.3s;
+        }
+
+        .payment-method:hover {
+            border-color: #667eea;
+        }
+
+        .payment-method.selected {
+            border-color: #667eea;
+            background: rgba(102, 126, 234, 0.1);
+        }
+
+        .payment-method h3 {
+            font-size: 16px;
+            margin-bottom: 5px;
+            display: flex;
+            align-items: center;
+            gap: 10px;
+        }
+
+        .payment-method p {
+            font-size: 14px;
+            color: #aaa;
+        }
+
+        .discount-badge {
+            background: #00c851;
+            color: white;
+            padding: 3px 8px;
+            border-radius: 4px;
+            font-size: 12px;
+            font-weight: bold;
+        }
+
+        .ton-connect-container {
+            margin-top: 15px;
+            padding: 15px;
+            background: rgba(0, 136, 254, 0.1);
+            border-radius: 8px;
+            border: 1px solid rgba(0, 136, 254, 0.3);
+        }
+
+        .ton-wallet-info {
+            display: flex;
+            align-items: center;
+            gap: 10px;
+            margin-bottom: 10px;
+        }
+
+        .ton-amount {
+            font-size: 18px;
+            font-weight: bold;
+            color: #0088fe;
+        }
+
+        #tonConnectButton {
+            width: 100%;
+        }
+
+        .submit-button {
+            width: 100%;
+            padding: 16px;
+            background: #667eea;
+            color: white;
+            border: none;
+            border-radius: 12px;
+            font-size: 16px;
+            font-weight: bold;
+            cursor: pointer;
+            transition: all 0.3s;
+        }
+
+        .submit-button:hover {
+            background: #5568d3;
+        }
+
+        .submit-button:disabled {
+            background: #444;
+            cursor: not-allowed;
+        }
+
+        .loading {
+            display: none;
+            text-align: center;
+            padding: 20px;
+        }
+
+        .spinner {
+            border: 3px solid rgba(255, 255, 255, 0.1);
+            border-top: 3px solid #667eea;
+            border-radius: 50%;
+            width: 40px;
+            height: 40px;
+            animation: spin 1s linear infinite;
+            margin: 0 auto 10px;
+        }
+
+        @keyframes spin {
+            0% { transform: rotate(0deg); }
+            100% { transform: rotate(360deg); }
+        }
+
+        .error-message {
+            background: rgba(255, 59, 48, 0.1);
+            border: 1px solid rgba(255, 59, 48, 0.3);
+            color: #ff3b30;
+            padding: 12px;
+            border-radius: 8px;
+            margin-bottom: 15px;
+            display: none;
+        }
+
+        .success-message {
+            background: rgba(52, 199, 89, 0.1);
+            border: 1px solid rgba(52, 199, 89, 0.3);
+            color: #34c759;
+            padding: 12px;
+            border-radius: 8px;
+            margin-bottom: 15px;
+            display: none;
+        }
+
+        .relative {
+            position: relative;
+        }
+    </style>
+</head>
+<body>
+    <div class="container">
+        <div class="header">
+            <h1>📦 Оформлення замовлення</h1>
+        </div>
+
+        <div class="phone-info" id="phoneInfo">
+            <div class="phone-number" id="phoneNumber">+380 ...</div>
+            <div class="price-info">
+                <div>
+                    <div class="price-uah"><span id="priceUAH">0</span> грн</div>
+                    <div class="price-ton">≈ <span id="priceTON">0</span> TON</div>
+                </div>
+            </div>
+        </div>
+
+        <div class="error-message" id="errorMessage"></div>
+        <div class="success-message" id="successMessage"></div>
+
+        <form id="deliveryForm">
+            <div class="form-section">
+                <h2>👤 Контактні дані</h2>
+                <div class="form-group">
+                    <label>Прізвище</label>
+                    <input type="text" id="lastName" required placeholder="Іванов">
+                </div>
+                <div class="form-group">
+                    <label>Ім'я</label>
+                    <input type="text" id="firstName" required placeholder="Іван">
+                </div>
+                <div class="form-group">
+                    <label>По батькові</label>
+                    <input type="text" id="middleName" placeholder="Іванович">
+                </div>
+                <div class="form-group">
+                    <label>Телефон</label>
+                    <input type="tel" id="phone" required placeholder="+380 XX XXX XX XX">
+                </div>
+            </div>
+
+            <div class="form-section">
+                <h2>📍 Доставка Новою Поштою</h2>
+                <div class="form-group relative">
+                    <label>Місто</label>
+                    <input type="text" id="city" required placeholder="Почніть вводити назву міста" autocomplete="off">
+                    <div class="autocomplete-results" id="cityResults"></div>
+                </div>
+                <div class="form-group">
+                    <label>Область</label>
+                    <input type="text" id="region" readonly placeholder="Автоматично">
+                </div>
+                <div class="form-group">
+                    <label>Район</label>
+                    <input type="text" id="district" readonly placeholder="Автоматично">
+                </div>
+                <div class="form-group">
+                    <label>Відділення</label>
+                    <select id="warehouse" required>
+                        <option value="">Спочатку оберіть місто</option>
+                    </select>
+                </div>
+            </div>
+
+            <div class="form-section">
+                <h2>💳 Спосіб оплати</h2>
+                
+                <div class="payment-method" data-method="cash" onclick="selectPaymentMethod('cash')">
+                    <h3>
+                        <input type="radio" name="payment" value="cash" id="paymentCash">
+                        💵 Оплата при отриманні
+                    </h3>
+                    <p>Готівкою або карткою на відділенні Нової Пошти</p>
+                </div>
+
+                <div class="payment-method" data-method="ton" onclick="selectPaymentMethod('ton')">
+                    <h3>
+                        <input type="radio" name="payment" value="ton" id="paymentTon">
+                        💎 Оплата TON
+                        <span class="discount-badge">-5%</span>
+                    </h3>
+                    <p>Оплата криптовалютою TON зі знижкою 5%</p>
+                    
+                    <div class="ton-connect-container" id="tonConnectContainer" style="display: none;">
+                        <div class="ton-wallet-info">
+                            <span>Сума до сплати:</span>
+                            <span class="ton-amount" id="tonAmount">0 TON</span>
+                        </div>
+                        <div id="tonConnectButton"></div>
+                        <div id="walletInfo" style="margin-top: 10px; display: none;">
+                            <p style="font-size: 12px; color: #aaa;">Гаманець підключено: <span id="walletAddress"></span></p>
+                        </div>
+                    </div>
+                </div>
+            </div>
+
+            <div class="loading" id="loading">
+                <div class="spinner"></div>
+                <p>Обробка замовлення...</p>
+            </div>
+
+            <button type="submit" class="submit-button" id="submitButton">
+                Підтвердити замовлення
+            </button>
+        </form>
+    </div>
+
+    <script>
+        const tg = window.Telegram.WebApp;
+        tg.expand();
+        tg.ready();
+
+        // Получаем данные из URL
+        const urlParams = new URLSearchParams(window.location.search);
+        const phoneId = urlParams.get('phoneId');
+        const phoneNumber = urlParams.get('phone');
+        const priceUAH = parseFloat(urlParams.get('price'));
+
+        // TON Connect
+        let tonConnectUI;
+        let tonRate = 0;
+        let selectedPaymentMethod = 'cash';
+        let selectedCityRef = '';
+
+        // Инициализация TON Connect
+        async function initTonConnect() {
+            tonConnectUI = new TON_CONNECT_UI.TonConnectUI({
+                manifestUrl: 'https://ph-mp.vercel.app/tonconnect-manifest.json',
+                buttonRootId: 'tonConnectButton'
+            });
+
+            tonConnectUI.onStatusChange(wallet => {
+                if (wallet) {
+                    const address = wallet.account.address;
+                    const shortAddress = address.slice(0, 6) + '...' + address.slice(-4);
+                    document.getElementById('walletAddress').textContent = shortAddress;
+                    document.getElementById('walletInfo').style.display = 'block';
+                }
+            });
+        }
+
+        // Получение курса TON
+        async function getTonRate() {
+            try {
+                const response = await fetch('https://ph-mp-api.vercel.app/api/ton-rate');
+                const data = await response.json();
+                tonRate = data.rate;
+                updatePrices();
+            } catch (error) {
+                console.error('Error fetching TON rate:', error);
+                tonRate = 300; // Fallback значение
+                updatePrices();
+            }
+        }
+
+        // Обновление цен
+        function updatePrices() {
+            document.getElementById('phoneNumber').textContent = phoneNumber;
+            document.getElementById('priceUAH').textContent = priceUAH;
+            
+            const priceTON = (priceUAH / tonRate).toFixed(2);
+            document.getElementById('priceTON').textContent = priceTON;
+            
+            // Цена со скидкой 5% для TON
+            const discountedPrice = priceUAH * 0.95;
+            const discountedPriceTON = (discountedPrice / tonRate).toFixed(2);
+            document.getElementById('tonAmount').textContent = discountedPriceTON + ' TON';
+        }
+
+        // Выбор способа оплаты
+        function selectPaymentMethod(method) {
+            selectedPaymentMethod = method;
+            
+            document.querySelectorAll('.payment-method').forEach(el => {
+                el.classList.remove('selected');
+            });
+            
+            document.querySelector(`[data-method="${method}"]`).classList.add('selected');
+            document.getElementById(`payment${method === 'cash' ? 'Cash' : 'Ton'}`).checked = true;
+            
+            if (method === 'ton') {
+                document.getElementById('tonConnectContainer').style.display = 'block';
+            } else {
+                document.getElementById('tonConnectContainer').style.display = 'none';
+            }
+        }
+
+        // Автодополнение городов
+        let cityTimeout;
+        document.getElementById('city').addEventListener('input', function(e) {
+            clearTimeout(cityTimeout);
+            const query = e.target.value;
+            
+            if (query.length < 2) {
+                document.getElementById('cityResults').innerHTML = '';
+                return;
+            }
+            
+            cityTimeout = setTimeout(async () => {
+                try {
+                    const response = await fetch('https://ph-mp-api.vercel.app/api/np-cities', {
+                        method: 'POST',
+                        headers: { 'Content-Type': 'application/json' },
+                        body: JSON.stringify({ query })
+                    });
+                    
+                    const data = await response.json();
+                    
+                    if (data.success && data.cities.length > 0) {
+                        const resultsHtml = data.cities.map(city => 
+                            `<div class="autocomplete-item" onclick="selectCity('${city.Ref}', '${city.Present}', '${city.Area}', '${city.Region}')">
+                                ${city.Present}
+                            </div>`
+                        ).join('');
+                        
+                        document.getElementById('cityResults').innerHTML = resultsHtml;
+                    } else {
+                        document.getElementById('cityResults').innerHTML = 
+                            '<div class="autocomplete-item">Міста не знайдено</div>';
+                    }
+                } catch (error) {
+                    console.error('Error fetching cities:', error);
+                }
+            }, 300);
+        });
+
+        // Выбор города
+        function selectCity(ref, present, area, region) {
+            selectedCityRef = ref;
+            document.getElementById('city').value = present;
+            document.getElementById('region').value = area;
+            document.getElementById('district').value = region;
+            document.getElementById('cityResults').innerHTML = '';
+            
+            loadWarehouses(ref);
+        }
+
+        // Загрузка отделений
+        async function loadWarehouses(cityRef) {
+            const warehouseSelect = document.getElementById('warehouse');
+            warehouseSelect.innerHTML = '<option value="">Завантаження...</option>';
+            
+            try {
+                const response = await fetch('https://ph-mp-api.vercel.app/api/np-warehouses', {
+                    method: 'POST',
+                    headers: { 'Content-Type': 'application/json' },
+                    body: JSON.stringify({ cityRef })
+                });
+                
+                const data = await response.json();
+                
+                if (data.success && data.warehouses.length > 0) {
+                    warehouseSelect.innerHTML = '<option value="">Оберіть відділення</option>' +
+                        data.warehouses.map(w => 
+                            `<option value="${w.Description}">${w.Description}</option>`
+                        ).join('');
+                } else {
+                    warehouseSelect.innerHTML = '<option value="">Відділення не знайдено</option>';
+                }
+            } catch (error) {
+                console.error('Error loading warehouses:', error);
+                warehouseSelect.innerHTML = '<option value="">Помилка завантаження</option>';
+            }
+        }
+
+        // Отправка формы
+        document.getElementById('deliveryForm').addEventListener('submit', async (e) => {
+            e.preventDefault();
+            
+            const submitButton = document.getElementById('submitButton');
+            const loading = document.getElementById('loading');
+            const errorMessage = document.getElementById('errorMessage');
+            const successMessage = document.getElementById('successMessage');
+            
+            submitButton.disabled = true;
+            loading.style.display = 'block';
+            errorMessage.style.display = 'none';
+            successMessage.style.display = 'none';
+            
+            try {
+                // Если выбрана оплата TON
+                if (selectedPaymentMethod === 'ton') {
+                    if (!tonConnectUI.wallet) {
+                        throw new Error('Будь ласка, підключіть TON гаманець');
+                    }
+                    
+                    // Отправка TON транзакции
+                    const discountedPrice = priceUAH * 0.95;
+                    const amountTON = (discountedPrice / tonRate).toFixed(2);
+                    const amountNano = Math.floor(parseFloat(amountTON) * 1000000000);
+                    
+                    const transaction = {
+                        validUntil: Math.floor(Date.now() / 1000) + 600,
+                        messages: [
+                            {
+                                address: 'UQDufs4rFTEGSXIBKy6_-yJB5f99MFBJ_v6hOiUQkQTrunUm',
+                                amount: amountNano.toString(),
+                                payload: btoa(`Order: ${phoneNumber}`)
+                            }
+                        ]
+                    };
+                    
+                    const result = await tonConnectUI.sendTransaction(transaction);
+                    
+                    // Подождем немного для подтверждения транзакции
+                    await new Promise(resolve => setTimeout(resolve, 3000));
+                }
+                
+                // Отправка данных на сервер
+                const orderData = {
+                    phoneId,
+                    phoneNumber,
+                    price: priceUAH,
+                    customer: {
+                        lastName: document.getElementById('lastName').value,
+                        firstName: document.getElementById('firstName').value,
+                        middleName: document.getElementById('middleName').value,
+                        phone: document.getElementById('phone').value
+                    },
+                    delivery: {
+                        city: document.getElementById('city').value,
+                        region: document.getElementById('region').value,
+                        district: document.getElementById('district').value,
+                        warehouse: document.getElementById('warehouse').value
+                    },
+                    paymentMethod: selectedPaymentMethod,
+                    tonTransaction: selectedPaymentMethod === 'ton' ? tonConnectUI.wallet : null
+                };
+                
+                const response = await fetch('https://ph-mp-api.vercel.app/api/order', {
+                    method: 'POST',
+                    headers: { 'Content-Type': 'application/json' },
+                    body: JSON.stringify(orderData)
+                });
+                
+                const data = await response.json();
+                
+                if (data.success) {
+                    successMessage.textContent = '✅ Замовлення успішно оформлено!';
+                    successMessage.style.display = 'block';
+                    
+                    setTimeout(() => {
+                        tg.close();
+                    }, 2000);
+                } else {
+                    throw new Error(data.error || 'Помилка оформлення замовлення');
+                }
+                
+            } catch (error) {
+                console.error('Order error:', error);
+                errorMessage.textContent = error.message || 'Помилка оформлення замовлення';
+                errorMessage.style.display = 'block';
+                submitButton.disabled = false;
+            } finally {
+                loading.style.display = 'none';
+            }
+        });
+
+        // Инициализация
+        selectPaymentMethod('cash');
+        getTonRate();
+        initTonConnect();
+
+        // Скрыть результаты при клике вне
+        document.addEventListener('click', (e) => {
+            if (!e.target.closest('.relative')) {
+                document.getElementById('cityResults').innerHTML = '';
+            }
+        });
+    </script>
+</body>
+</html>
