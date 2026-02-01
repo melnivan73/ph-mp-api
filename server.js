@@ -610,6 +610,66 @@ app.post('/api/telegram-webhook', async (req, res) => {
         await bot.answerCallbackQuery(callbackQuery.id);
       }
 
+      // КЛИЕНТ ПОДТВЕРДИЛ ОПЛАТУ TON
+      else if (action === 'ton' && data.split('_')[1] === 'confirm') {
+        await bot.editMessageReplyMarkup({ inline_keyboard: [] }, {
+          chat_id: order.userId,
+          message_id: callbackQuery.message.message_id
+        });
+
+        const deliveryData = order.deliveryData || {};
+        const phonesList = order.phones.map(p => p.number).join(', ');
+
+        // Сообщение клиенту
+        await bot.sendMessage(order.userId, 
+          '✅ Дякуємо!\n\n' +
+          'Наш менеджер перевірить надходження платежу та зв\'яжеться з вами для підтвердження замовлення.\n\n' +
+          '⏱ Зазвичай це займає 5-15 хвилин.'
+        );
+
+        // Подробное сообщение админу для проверки
+        const adminConfirmMessage = `💎 Клієнт підтвердив оплату TON!
+
+📱 Номер: ${phonesList}
+💰 Сума: ${order.totalUah.toLocaleString('uk-UA')} грн.
+💎 Має бути сплачено: ${order.totalTonWithDiscount} TON
+
+👤 Замовник: @${order.username} (ID: ${order.userId})
+
+📮 Дані для відправки:
+${Object.entries(deliveryData).map(([key, value]) => `${key}: ${value}`).join('\n')}
+
+⚠️ ПЕРЕВІРТЕ НАДХОДЖЕННЯ ПЛАТЕЖУ НА ГАМАНЕЦЬ:
+UQA3soK4ABEWcsjblRdxW2bBd8Wgfli4WjURqr4p3s-eHpx5
+
+Після підтвердження оплати зв'яжіться з клієнтом.`;
+
+        await bot.sendMessage(ADMIN_ID, adminConfirmMessage);
+
+        activeOrders.delete(orderId);
+        await bot.answerCallbackQuery(callbackQuery.id);
+      }
+
+      // КЛИЕНТ ОТМЕНИЛ ОПЛАТУ TON
+      else if (action === 'ton' && data.split('_')[1] === 'cancel') {
+        await bot.editMessageReplyMarkup({ inline_keyboard: [] }, {
+          chat_id: order.userId,
+          message_id: callbackQuery.message.message_id
+        });
+
+        await bot.sendMessage(order.userId, 
+          '❌ Замовлення скасовано.\n\n' +
+          'Якщо у вас виникли питання - зв\'яжіться з нашим менеджером.'
+        );
+
+        await bot.sendMessage(ADMIN_ID, 
+          `❌ Клієнт @${order.username} (ID: ${order.userId}) скасував замовлення на оплату TON`
+        );
+
+        activeOrders.delete(orderId);
+        await bot.answerCallbackQuery(callbackQuery.id);
+      }
+
       // КЛИЕНТ ВЫБРАЛ СПОСОБ ОПЛАТЫ
       else if (action === 'payment') {
         const paymentType = data.split('_')[2];
@@ -643,10 +703,58 @@ ${Object.entries(deliveryData).map(([key, value]) => `${key}: ${value}`).join('\
           activeOrders.delete(orderId);
         } 
         else if (paymentType === 'ton') {
-          await bot.sendMessage(order.userId, 
-            '💎 Оплата через TON буде доступна найближчим часом.\n\n' +
-            'Будь ласка, оберіть "Оплата при отриманні"'
-          );
+          await bot.editMessageReplyMarkup({ inline_keyboard: [] }, {
+            chat_id: order.userId,
+            message_id: callbackQuery.message.message_id
+          });
+
+          const TON_WALLET = 'UQA3soK4ABEWcsjblRdxW2bBd8Wgfli4WjURqr4p3s-eHpx5';
+          const phonesList = order.phones.map(p => p.number).join(', ');
+          
+          // Формируем сообщение с реквизитами для оплаты
+          const tonPaymentMessage = `💎 Оплата в TON
+
+📱 Номер: ${phonesList}
+💰 Сума: ${order.totalUah.toLocaleString('uk-UA')} грн.
+💎 До сплати зі знижкою -5%: ${order.totalTonWithDiscount} TON
+(приблизно ${order.totalUahWithDiscount.toLocaleString('uk-UA')} грн.)
+
+📌 Курс TON: ${order.tonRate.toFixed(2)} UAH
+
+🔹 Гаманець для оплати:
+\`${TON_WALLET}\`
+
+⚠️ Важливо:
+1. Відправте точно ${order.totalTonWithDiscount} TON на вказаний гаманець
+2. Після оплати натисніть кнопку "Оплату завершено"
+3. Наш менеджер перевірить платіж та підтвердить замовлення`;
+
+          await bot.sendMessage(order.userId, tonPaymentMessage, {
+            parse_mode: 'Markdown',
+            reply_markup: {
+              inline_keyboard: [
+                [
+                  { text: '✅ Оплату завершено', callback_data: `ton_confirm_${orderId}` }
+                ],
+                [
+                  { text: '❌ Скасувати замовлення', callback_data: `ton_cancel_${orderId}` }
+                ]
+              ]
+            }
+          });
+
+          // Уведомляем админа о выборе TON
+          const adminNotification = `💎 Клієнт обрав оплату TON
+
+👤 Замовник: @${order.username} (ID: ${order.userId})
+📱 Номер: ${phonesList}
+💰 Сума: ${order.totalUah.toLocaleString('uk-UA')} грн.
+💎 До оплати: ${order.totalTonWithDiscount} TON
+
+Очікується оплата на гаманець:
+${TON_WALLET}`;
+
+          await bot.sendMessage(ADMIN_ID, adminNotification);
         }
 
         await bot.answerCallbackQuery(callbackQuery.id);
