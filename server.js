@@ -755,6 +755,8 @@ ${Object.entries(deliveryData).map(([key, value]) => `${key}: ${value}`).join('\
 ${TON_WALLET}`;
 
           await bot.sendMessage(ADMIN_ID, adminNotification);
+          
+          // НЕ удаляем заказ! Он нужен для ton_confirm/ton_cancel
         }
 
         await bot.answerCallbackQuery(callbackQuery.id);
