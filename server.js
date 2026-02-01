@@ -335,6 +335,134 @@ ${phonesList}
 });
 
 // ========================================
+// NOVA POSHTA API INTEGRATION
+// ========================================
+
+const NP_API_KEY = process.env.NOVAPOSHTA_API_KEY;
+const NP_API_URL = 'https://api.novaposhta.ua/v2.0/json/';
+
+// Поиск городов
+app.post('/api/np-cities', async (req, res) => {
+  try {
+    const { query } = req.body;
+    
+    if (!query || query.length < 2) {
+      return res.json({
+        success: true,
+        data: []
+      });
+    }
+
+    const response = await fetch(NP_API_URL, {
+      method: 'POST',
+      headers: {
+        'Content-Type': 'application/json'
+      },
+      body: JSON.stringify({
+        apiKey: NP_API_KEY,
+        modelName: 'Address',
+        calledMethod: 'searchSettlements',
+        methodProperties: {
+          CityName: query,
+          Limit: 10
+        }
+      })
+    });
+
+    const result = await response.json();
+
+    if (result.success && result.data && result.data[0]) {
+      const cities = result.data[0].Addresses || [];
+      
+      const formattedCities = cities.map(city => ({
+        ref: city.DeliveryCity || city.Ref,
+        mainDescription: city.MainDescription || '',
+        area: city.Area || '',
+        region: city.Region || '',
+        presentName: city.Present || city.MainDescription || ''
+      }));
+
+      res.json({
+        success: true,
+        data: formattedCities
+      });
+    } else {
+      res.json({
+        success: true,
+        data: []
+      });
+    }
+
+  } catch (error) {
+    console.error('Nova Poshta cities error:', error);
+    res.status(500).json({
+      success: false,
+      error: 'Помилка отримання міст',
+      message: error.message
+    });
+  }
+});
+
+// Получить склады по городу
+app.post('/api/np-warehouses', async (req, res) => {
+  try {
+    const { cityRef } = req.body;
+    
+    if (!cityRef) {
+      return res.status(400).json({
+        success: false,
+        error: 'cityRef не вказано'
+      });
+    }
+
+    const response = await fetch(NP_API_URL, {
+      method: 'POST',
+      headers: {
+        'Content-Type': 'application/json'
+      },
+      body: JSON.stringify({
+        apiKey: NP_API_KEY,
+        modelName: 'Address',
+        calledMethod: 'getWarehouses',
+        methodProperties: {
+          CityRef: cityRef,
+          Limit: 500
+        }
+      })
+    });
+
+    const result = await response.json();
+
+    if (result.success && result.data) {
+      const warehouses = result.data.map(wh => ({
+        ref: wh.Ref,
+        description: wh.Description,
+        number: wh.Number || '',
+        shortAddress: wh.ShortAddress || ''
+      }));
+
+      res.json({
+        success: true,
+        data: warehouses
+      });
+    } else {
+      res.json({
+        success: true,
+        data: []
+      });
+    }
+
+  } catch (error) {
+    console.error('Nova Poshta warehouses error:', error);
+    res.status(500).json({
+      success: false,
+      error: 'Помилка отримання відділень',
+      message: error.message
+    });
+  }
+});
+
+// ========================================
 // ПРИЕМ ДАННЫХ ДОСТАВКИ ИЗ ФОРМЫ
 // ========================================
 
