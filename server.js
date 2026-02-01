@@ -555,8 +555,11 @@ async function checkTonTransaction(orderId) {
     const order = activeOrders.get(orderId);
     if (!order) return { found: false };
 
+    const txData = tonTransactions.get(orderId);
+    if (!txData) return { found: false };
+
     // Получаем последние транзакции кошелька
-    const url = `${TON_API_URL}/getTransactions?address=${MERCHANT_WALLET}&limit=10`;
+    const url = `${TON_API_URL}/getTransactions?address=${MERCHANT_WALLET}&limit=20`;
     
     return new Promise((resolve, reject) => {
       https.get(url, (res) => {
@@ -570,18 +573,21 @@ async function checkTonTransaction(orderId) {
             
             if (result.ok && result.result) {
               const expectedAmount = Math.floor(order.totalTonWithDiscount * 1000000000);
-              const comment = `order_${orderId}`;
+              const txTimestamp = txData.timestamp;
               
-              // Ищем транзакцию с нужной суммой и комментарием
+              // Ищем транзакцию с нужной суммой после создания заказа
               for (const tx of result.result) {
                 if (tx.in_msg && tx.in_msg.value) {
                   const amount = parseInt(tx.in_msg.value);
-                  const txComment = tx.in_msg.message || '';
+                  const txTime = tx.utime * 1000; // Конвертируем в milliseconds
                   
-                  // Проверяем сумму (допуск ±1%)
+                  // Проверяем:
+                  // 1. Сумма совпадает (допуск ±2%)
+                  // 2. Транзакция после создания заказа
                   const amountDiff = Math.abs(amount - expectedAmount) / expectedAmount;
+                  const isAfterOrder = txTime >= (txTimestamp - 60000); // с запасом 1 минута
                   
-                  if (amountDiff < 0.01 && txComment.includes(orderId)) {
+                  if (amountDiff < 0.02 && isAfterOrder) {
                     return resolve({
                       found: true,
                       txHash: tx.transaction_id.hash,
