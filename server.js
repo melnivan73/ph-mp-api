@@ -620,14 +620,12 @@ app.post('/api/telegram-webhook', async (req, res) => {
         const deliveryData = order.deliveryData || {};
         const phonesList = order.phones.map(p => p.number).join(', ');
 
-        // Сообщение клиенту
         await bot.sendMessage(order.userId, 
           '✅ Дякуємо!\n\n' +
           'Наш менеджер перевірить надходження платежу та зв\'яжеться з вами для підтвердження замовлення.\n\n' +
           '⏱ Зазвичай це займає 5-15 хвилин.'
         );
 
-        // Подробное сообщение админу для проверки
         const adminConfirmMessage = `💎 Клієнт підтвердив оплату TON!
 
 📱 Номер: ${phonesList}
@@ -711,7 +709,6 @@ ${Object.entries(deliveryData).map(([key, value]) => `${key}: ${value}`).join('\
           const TON_WALLET = 'UQA3soK4ABEWcsjblRdxW2bBd8Wgfli4WjURqr4p3s-eHpx5';
           const phonesList = order.phones.map(p => p.number).join(', ');
           
-          // Формируем сообщение с реквизитами для оплаты
           const tonPaymentMessage = `💎 Оплата в TON
 
 📱 Номер: ${phonesList}
@@ -743,7 +740,6 @@ ${Object.entries(deliveryData).map(([key, value]) => `${key}: ${value}`).join('\
             }
           });
 
-          // Уведомляем админа о выборе TON
           const adminNotification = `💎 Клієнт обрав оплату TON
 
 👤 Замовник: @${order.username} (ID: ${order.userId})
@@ -755,8 +751,6 @@ ${Object.entries(deliveryData).map(([key, value]) => `${key}: ${value}`).join('\
 ${TON_WALLET}`;
 
           await bot.sendMessage(ADMIN_ID, adminNotification);
-          
-          // НЕ удаляем заказ! Он нужен для ton_confirm/ton_cancel
         }
 
         await bot.answerCallbackQuery(callbackQuery.id);
