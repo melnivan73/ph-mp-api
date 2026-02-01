@@ -4,6 +4,7 @@ const cors = require('cors');
 const { google } = require('googleapis');
 const TelegramBot = require('node-telegram-bot-api');
 const crypto = require('crypto');
+const https = require('https');
 
 const app = express();
 const PORT = process.env.PORT || 3000;
@@ -29,6 +30,9 @@ const bot = new TelegramBot(BOT_TOKEN);
 
 // Хранилище заказов (в продакшене использовать БД)
 const activeOrders = new Map();
+
+// Хранилище TON транзакций
+const tonTransactions = new Map();
 
 // Кэш курса TON
 let tonRateCache = {
@@ -539,6 +543,222 @@ app.post('/api/delivery-data', async (req, res) => {
 });
 
 // ========================================
+// TON PAYMENT ENDPOINTS
+// ========================================
+
+const TON_API_URL = 'https://toncenter.com/api/v2';
+const MERCHANT_WALLET = 'UQA3soK4ABEWcsjblRdxW2bBd8Wgfli4WjURqr4p3s-eHpx5';
+
+// Функция проверки транзакции TON
+async function checkTonTransaction(orderId) {
+  try {
+    const order = activeOrders.get(orderId);
+    if (!order) return { found: false };
+
+    // Получаем последние транзакции кошелька
+    const url = `${TON_API_URL}/getTransactions?address=${MERCHANT_WALLET}&limit=10`;
+    
+    return new Promise((resolve, reject) => {
+      https.get(url, (res) => {
+        let data = '';
+        
+        res.on('data', chunk => data += chunk);
+        
+        res.on('end', () => {
+          try {
+            const result = JSON.parse(data);
+            
+            if (result.ok && result.result) {
+              const expectedAmount = Math.floor(order.totalTonWithDiscount * 1000000000);
+              const comment = `order_${orderId}`;
+              
+              // Ищем транзакцию с нужной суммой и комментарием
+              for (const tx of result.result) {
+                if (tx.in_msg && tx.in_msg.value) {
+                  const amount = parseInt(tx.in_msg.value);
+                  const txComment = tx.in_msg.message || '';
+                  
+                  // Проверяем сумму (допуск ±1%)
+                  const amountDiff = Math.abs(amount - expectedAmount) / expectedAmount;
+                  
+                  if (amountDiff < 0.01 && txComment.includes(orderId)) {
+                    return resolve({
+                      found: true,
+                      txHash: tx.transaction_id.hash,
+                      amount: amount / 1000000000,
+                      timestamp: tx.utime
+                    });
+                  }
+                }
+              }
+              
+              resolve({ found: false });
+            } else {
+              resolve({ found: false });
+            }
+          } catch (error) {
+            reject(error);
+          }
+        });
+      }).on('error', reject);
+    });
+    
+  } catch (error) {
+    console.error('TON API error:', error);
+    return { found: false };
+  }
+}
+
+// Получить детали заказа для страницы оплаты
+app.get('/api/order-details/:orderId', async (req, res) => {
+  try {
+    const { orderId } = req.params;
+    const order = activeOrders.get(orderId);
+    
+    if (!order) {
+      return res.status(404).json({
+        success: false,
+        error: 'Замовлення не знайдено'
+      });
+    }
+
+    res.json({
+      success: true,
+      data: {
+        orderId: order.orderId,
+        phones: order.phones,
+        totalUah: order.totalUah,
+        totalTonWithDiscount: order.totalTonWithDiscount,
+        totalUahWithDiscount: order.totalUahWithDiscount,
+        tonRate: order.tonRate
+      }
+    });
+  } catch (error) {
+    res.status(500).json({
+      success: false,
+      error: 'Помилка завантаження даних',
+      message: error.message
+    });
+  }
+});
+
+// Уведомление о TON транзакции
+app.post('/api/ton-transaction', async (req, res) => {
+  try {
+    const { orderId, boc, wallet } = req.body;
+    
+    tonTransactions.set(orderId, {
+      boc,
+      wallet,
+      timestamp: Date.now(),
+      confirmed: false
+    });
+
+    res.json({ success: true });
+  } catch (error) {
+    res.status(500).json({
+      success: false,
+      error: error.message
+    });
+  }
+});
+
+// Проверка подтверждения TON платежа
+app.get('/api/check-ton-payment/:orderId', async (req, res) => {
+  try {
+    const { orderId } = req.params;
+    
+    // Проверяем транзакцию через TON API
+    const txResult = await checkTonTransaction(orderId);
+    
+    if (txResult.found) {
+      // Транзакция найдена - уведомляем админа
+      const order = activeOrders.get(orderId);
+      
+      if (order && !tonTransactions.get(orderId)?.confirmed) {
+        tonTransactions.set(orderId, {
+          ...tonTransactions.get(orderId),
+          confirmed: true,
+          txHash: txResult.txHash
+        });
+
+        const deliveryData = order.deliveryData || {};
+        const phonesList = order.phones.map(p => p.number).join(', ');
+
+        const adminMessage = `✅ Оплата TON підтверджена!
+
+📱 Номер: ${phonesList}
+💰 Сума: ${order.totalUah.toLocaleString('uk-UA')} грн.
+💎 Сплачено: ${txResult.amount} TON
+
+👤 Замовник: @${order.username} (ID: ${order.userId})
+
+📮 Дані для відправки:
+${Object.entries(deliveryData).map(([key, value]) => `${key}: ${value}`).join('\n')}
+
+🔗 Hash транзакції: ${txResult.txHash}`;
+
+        await bot.sendMessage(ADMIN_ID, adminMessage);
+
+        await bot.sendMessage(order.userId,
+          '✅ Оплата підтверджена!\n\n' +
+          'Ваше замовлення прийнято. Менеджер зв\'яжеться з вами найближчим часом.'
+        );
+
+        activeOrders.delete(orderId);
+      }
+      
+      res.json({
+        success: true,
+        confirmed: true,
+        txHash: txResult.txHash
+      });
+    } else {
+      res.json({
+        success: true,
+        confirmed: false
+      });
+    }
+  } catch (error) {
+    console.error('Check payment error:', error);
+    res.status(500).json({
+      success: false,
+      error: error.message,
+      confirmed: false
+    });
+  }
+});
+
+// Отмена заказа
+app.post('/api/cancel-order', async (req, res) => {
+  try {
+    const { orderId } = req.body;
+    const order = activeOrders.get(orderId);
+    
+    if (!order) {
+      return res.status(404).json({
+        success: false,
+        error: 'Замовлення не знайдено'
+      });
+    }
+
+    await bot.sendMessage(ADMIN_ID,
+      `❌ Клієнт @${order.username} (ID: ${order.userId}) скасував замовлення TON`
+    );
+
+    activeOrders.delete(orderId);
+    tonTransactions.delete(orderId);
+
+    res.json({ success: true });
+  } catch (error) {
+    res.status(500).json({
+      success: false,
+      error: error.message
+    });
+  }
+});
+
+// ========================================
 // ОБРАБОТКА CALLBACK ОТ TELEGRAM
 // ========================================
 
@@ -643,10 +863,43 @@ ${Object.entries(deliveryData).map(([key, value]) => `${key}: ${value}`).join('\
           activeOrders.delete(orderId);
         } 
         else if (paymentType === 'ton') {
-          await bot.sendMessage(order.userId, 
-            '💎 Оплата через TON буде доступна найближчим часом.\n\n' +
-            'Будь ласка, оберіть "Оплата при отриманні"'
-          );
+          await bot.editMessageReplyMarkup({ inline_keyboard: [] }, {
+            chat_id: order.userId,
+            message_id: callbackQuery.message.message_id
+          });
+
+          const phonesList = order.phones.map(p => p.number).join(', ');
+          
+          const tonPaymentMessage = `💎 Оплата в TON
+
+📱 Номер: ${phonesList}
+💰 Сума: ${order.totalUah.toLocaleString('uk-UA')} грн.
+💎 До сплати зі знижкою -5%: ${order.totalTonWithDiscount} TON
+
+Натисніть кнопку нижче для підключення гаманця та оплати:`;
+
+          await bot.sendMessage(order.userId, tonPaymentMessage, {
+            reply_markup: {
+              inline_keyboard: [
+                [{ 
+                  text: '💎 Підключити гаманець та оплатити', 
+                  web_app: { url: `https://ph-mp.vercel.app/ton-payment.html?orderId=${orderId}` }
+                }]
+              ]
+            }
+          });
+
+          // Уведомляем админа
+          const adminNotification = `💎 Клієнт обрав оплату TON
+
+👤 Замовник: @${order.username} (ID: ${order.userId})
+📱 Номер: ${phonesList}
+💰 Сума: ${order.totalUah.toLocaleString('uk-UA')} грн.
+💎 До оплати: ${order.totalTonWithDiscount} TON
+
+Очікується підключення гаманця...`;
+
+          await bot.sendMessage(ADMIN_ID, adminNotification);
         }
 
         await bot.answerCallbackQuery(callbackQuery.id);
