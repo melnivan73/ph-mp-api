@@ -472,7 +472,7 @@ app.post('/api/np-warehouses', async (req, res) => {
 
 app.post('/api/delivery-data', async (req, res) => {
   try {
-    const { orderId, phone, lastName, firstName, city, region, district, warehouse } = req.body;
+    const { orderId, phone, lastName, firstName, city, region, district, warehouse, paymentType } = req.body;
     
     if (!orderId) {
       return res.status(400).json({
@@ -504,33 +504,69 @@ app.post('/api/delivery-data', async (req, res) => {
     order.deliveryData = deliveryData;
     activeOrders.set(orderId, order);
 
-    // Отправляем клиенту кнопки выбора оплаты
-    const phonesList = order.phones.map(p => p.number).join(', ');
+    // Если выбрана оплата наличными - сразу обрабатываем
+    if (paymentType === 'cash') {
+      const phonesList = order.phones.map(p => p.number).join(', ');
+      
+      const adminMessage = `📦 Замовлення підтверджено (Оплата при отриманні)
 
-    const paymentMessage = `✅ Дані збережено!
+📱 Номер: ${phonesList}
+💰 Сума: ${order.totalUah.toLocaleString('uk-UA')} грн.
+
+👤 Замовник: @${order.username} (ID: ${order.userId})
+
+📮 Дані для відправки:
+${Object.entries(deliveryData).map(([key, value]) => `${key}: ${value}`).join('\n')}`;
+
+      await bot.sendMessage(ADMIN_ID, adminMessage);
+
+      await bot.sendMessage(order.userId, 
+        '✅ Ваше замовлення прийняте.\n\n' +
+        'Спосіб оплати: при отриманні.\n\n' +
+        'З вами можуть додатково зв\'язатися для уточнення даних.'
+      );
+
+      res.json({
+        success: true,
+        message: 'Замовлення прийнято'
+      });
+    } 
+    // Если TON - возвращаем успех, клиент перенаправится на страницу оплаты
+    else if (paymentType === 'ton') {
+      res.json({
+        success: true,
+        message: 'Дані збережено, перенаправлення на оплату TON'
+      });
+    }
+    // Старая логика - отправляем выбор оплаты в бот (не используется)
+    else {
+      const phonesList = order.phones.map(p => p.number).join(', ');
+
+      const paymentMessage = `✅ Дані збережено!
 
 📱 Номер: ${phonesList}
 💰 Сума: ${order.totalUah.toLocaleString('uk-UA')} грн.
 
 Виберіть спосіб оплати:`;
 
-    await bot.sendMessage(order.userId, paymentMessage, {
-      reply_markup: {
-        inline_keyboard: [
-          [
-            { text: '💵 Оплата при отриманні', callback_data: `payment_${orderId}_cash` }
-          ],
-          [
-            { text: `💎 Оплатити в TON -5% (${order.totalTonWithDiscount} TON)`, callback_data: `payment_${orderId}_ton` }
+      await bot.sendMessage(order.userId, paymentMessage, {
+        reply_markup: {
+          inline_keyboard: [
+            [
+              { text: '💵 Оплата при отриманні', callback_data: `payment_${orderId}_cash` }
+            ],
+            [
+              { text: `💎 Оплатити в TON -5% (${order.totalTonWithDiscount} TON)`, callback_data: `payment_${orderId}_ton` }
+            ]
           ]
-        ]
-      }
-    });
+        }
+      });
 
-    res.json({
-      success: true,
-      message: 'Дані збережено'
-    });
+      res.json({
+        success: true,
+        message: 'Дані збережено'
+      });
+    }
 
   } catch (error) {
     console.error('Помилка збереження даних:', error);
