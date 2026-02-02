@@ -711,7 +711,8 @@ ${Object.entries(deliveryData).map(([key, value]) => `${key}: ${value}`).join('\
           'Ваше замовлення прийнято. Менеджер зв\'яжеться з вами найближчим часом.'
         );
 
-        activeOrders.delete(orderId);
+        // НЕ удаляем заказ - сохраняем историю
+        // activeOrders.delete(orderId);
       }
       
       res.json({
@@ -753,7 +754,7 @@ app.post('/api/cancel-order', async (req, res) => {
       `⚠️ Клієнт @${order.username} (ID: ${order.userId}) відмінив оплату TON`
     );
 
-    // НЕ удаляем заказ! Только очищаем данные TON транзакции
+    // Очищаем данные TON транзакции
     tonTransactions.delete(orderId);
 
     // Отправляем клиенту снова выбор способа оплаты
@@ -776,6 +777,56 @@ app.post('/api/cancel-order', async (req, res) => {
         ]
       }
     });
+
+    res.json({ success: true });
+  } catch (error) {
+    res.status(500).json({
+      success: false,
+      error: error.message
+    });
+  }
+});
+
+// Оплата наличными из TON страницы
+app.post('/api/pay-by-cash', async (req, res) => {
+  try {
+    const { orderId } = req.body;
+    const order = activeOrders.get(orderId);
+    
+    if (!order) {
+      return res.status(404).json({
+        success: false,
+        error: 'Замовлення не знайдено'
+      });
+    }
+
+    const deliveryData = order.deliveryData || {};
+    const phonesList = order.phones.map(p => p.number).join(', ');
+    
+    // Отправляем админу
+    const adminMessage = `📦 Замовлення підтверджено (Оплата при отриманні)
+
+📱 Номер: ${phonesList}
+💰 Сума: ${order.totalUah.toLocaleString('uk-UA')} грн.
+
+👤 Замовник: @${order.username} (ID: ${order.userId})
+
+📮 Дані для відправки:
+${Object.entries(deliveryData).map(([key, value]) => `${key}: ${value}`).join('\n')}
+
+ℹ️ Клієнт змінив спосіб оплати з TON на готівку`;
+
+    await bot.sendMessage(ADMIN_ID, adminMessage);
+
+    // Отправляем клиенту
+    await bot.sendMessage(order.userId, 
+      '✅ Ваше замовлення прийняте.\n\n' +
+      'Спосіб оплати: при отриманні.\n\n' +
+      'З вами можуть додатково зв\'язатися для уточнення даних.'
+    );
+
+    // Очищаем TON данные
+    tonTransactions.delete(orderId);
 
     res.json({ success: true });
   } catch (error) {
@@ -854,7 +905,8 @@ app.post('/api/telegram-webhook', async (req, res) => {
           '❌ Номер зараз недоступний, з вами зв\'яжеться менеджер для уточнення інформації'
         );
 
-        activeOrders.delete(orderId);
+        // НЕ удаляем заказ - сохраняем историю
+        // activeOrders.delete(orderId);
         await bot.answerCallbackQuery(callbackQuery.id);
       }
 
@@ -888,7 +940,8 @@ ${Object.entries(deliveryData).map(([key, value]) => `${key}: ${value}`).join('\
             'З вами можуть додатково зв\'язатися для уточнення даних, що відсутні (невірні)'
           );
 
-          activeOrders.delete(orderId);
+          // НЕ удаляем заказ - сохраняем историю
+          // activeOrders.delete(orderId);
         } 
         else if (paymentType === 'ton') {
           await bot.editMessageReplyMarkup({ inline_keyboard: [] }, {
