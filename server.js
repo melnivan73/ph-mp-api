@@ -823,6 +823,53 @@ app.post('/api/cancel-order', async (req, res) => {
   }
 });
 
+// Обработка отмены TON оплаты - отправляем сообщение в бот с кнопкой
+app.post('/api/ton-payment-cancelled', async (req, res) => {
+  try {
+    const { orderId } = req.body;
+    const order = activeOrders.get(orderId);
+    
+    if (!order) {
+      return res.status(404).json({
+        success: false,
+        error: 'Замовлення не знайдено'
+      });
+    }
+
+    const phonesList = order.phones.map(p => p.number).join(', ');
+
+    // Уведомляем админа
+    await bot.sendMessage(ADMIN_ID,
+      `⚠️ Клієнт @${order.username} (ID: ${order.userId}) скасував оплату TON`
+    );
+
+    // Отправляем клиенту сообщение с кнопкой оплаты при получении
+    const cancelMessage = `❌ Ви скасували оплату TON
+
+📱 Номер: ${phonesList}
+💰 Сума: ${order.totalUah.toLocaleString('uk-UA')} грн.
+
+Ви можете оплатити при отриманні:`;
+
+    await bot.sendMessage(order.userId, cancelMessage, {
+      reply_markup: {
+        inline_keyboard: [
+          [
+            { text: '💵 Оплата при отриманні', callback_data: `payment_${orderId}_cash` }
+          ]
+        ]
+      }
+    });
+
+    res.json({ success: true });
+  } catch (error) {
+    res.status(500).json({
+      success: false,
+      error: error.message
+    });
+  }
+});
+
 // Оплата наличными из TON страницы
 app.post('/api/pay-by-cash', async (req, res) => {
   try {
