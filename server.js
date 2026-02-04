@@ -826,10 +826,24 @@ app.post('/api/cancel-order', async (req, res) => {
 // Обработка отмены TON оплаты - отправляем сообщение в бот с кнопкой
 app.post('/api/ton-payment-cancelled', async (req, res) => {
   try {
+    console.log('📥 Received cancellation request');
+    console.log('Body:', req.body);
+    console.log('Content-Type:', req.headers['content-type']);
+    
     const { orderId } = req.body;
+    
+    if (!orderId) {
+      console.error('❌ No orderId in request');
+      return res.status(400).json({
+        success: false,
+        error: 'orderId не вказано'
+      });
+    }
+    
     const order = activeOrders.get(orderId);
     
     if (!order) {
+      console.error('❌ Order not found:', orderId);
       return res.status(404).json({
         success: false,
         error: 'Замовлення не знайдено'
@@ -837,6 +851,8 @@ app.post('/api/ton-payment-cancelled', async (req, res) => {
     }
 
     const phonesList = order.phones.map(p => p.number).join(', ');
+
+    console.log('📤 Sending messages to admin and client...');
 
     // Уведомляем админа
     await bot.sendMessage(ADMIN_ID,
@@ -861,8 +877,11 @@ app.post('/api/ton-payment-cancelled', async (req, res) => {
       }
     });
 
+    console.log('✅ Messages sent successfully');
+
     res.json({ success: true });
   } catch (error) {
+    console.error('❌ Error in ton-payment-cancelled:', error);
     res.status(500).json({
       success: false,
       error: error.message
