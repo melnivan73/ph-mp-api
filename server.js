@@ -247,10 +247,21 @@ app.post('/api/order', async (req, res) => {
   try {
     const { phones, username, userId } = req.body;
     
+    console.log('📦 Order received:', { phones, username, userId });
+    
     if (!phones || phones.length === 0) {
       return res.status(400).json({
         success: false,
         error: 'Немає номерів для замовлення'
+      });
+    }
+
+    // Проверка наличия userId (критично для отправки в Telegram)
+    if (!userId) {
+      console.error('❌ userId is missing - cannot send to Telegram');
+      return res.status(400).json({
+        success: false,
+        error: 'Помилка: не вдалося визначити користувача. Відкрийте додаток через Telegram.'
       });
     }
 
