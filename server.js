@@ -308,8 +308,10 @@ ${phonesList}
 
 👤 Замовник: @${username || 'невідомий'} (ID: ${userId})`;
 
-    // Отправка клиенту
-    await bot.sendMessage(userId, clientMessage);
+    // Отправка клиенту (только если userId известен)
+    if (userId) {
+      await bot.sendMessage(userId, clientMessage);
+    }
 
     // Отправка админу с кнопками
     await bot.sendMessage(ADMIN_ID, adminMessage, {
