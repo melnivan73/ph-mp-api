@@ -1083,6 +1083,9 @@ ${Object.entries(deliveryData).map(([key, value]) => `${key}: ${value}`).join('\
     // Очищаем TON данные
     tonTransactions.delete(orderId);
 
+    // Обновляем статус в Sheets
+    await updateOrderInSheets(orderId, { status: 'накладений платіж (змінено з TON)' });
+
     res.json({ success: true });
   } catch (error) {
     res.status(500).json({
