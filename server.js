@@ -1063,7 +1063,8 @@ ${Object.entries(deliveryData).map(([key, value]) => `${key}: ${value}`).join('\
                 [{ 
                   text: '💎 Підключити гаманець та оплатити', 
                   web_app: { url: `https://ph-mp.vercel.app/ton-payment.html?orderId=${orderId}&phones=${encodeURIComponent(order.phones.map(p=>p.number).join(','))}&totalUah=${order.totalUah}&totalTon=${order.totalTonWithDiscount}&tonRate=${order.tonRate}&userId=${order.userId || ''}&username=${encodeURIComponent(order.username || '')}` }
-                }]
+                }],
+                [{ text: '💵 Відправити накладеним платежем', callback_data: `payment_${orderId}_cash` }]
               ]
             }
           });
@@ -1079,6 +1080,31 @@ ${Object.entries(deliveryData).map(([key, value]) => `${key}: ${value}`).join('\
 Очікується підключення гаманця...`;
 
           await bot.sendMessage(ADMIN_ID, adminNotification);
+
+          // Таймер 10 минут — если TON оплата не пришла, отправляем кнопку наложенного платежа
+          setTimeout(async () => {
+            try {
+              const currentOrder = activeOrders.get(orderId);
+              // Если заказ ещё не оплачен
+              if (currentOrder && !currentOrder.paid) {
+                const cashOfferMessage = `⏰ Час на оплату TON минув
+
+📱 Номер: ${phonesList}
+💰 Сума: ${order.totalUah.toLocaleString('uk-UA')} грн.
+
+Ви можете оформити накладений платіж:`;
+                await bot.sendMessage(order.userId, cashOfferMessage, {
+                  reply_markup: {
+                    inline_keyboard: [
+                      [{ text: '💵 Відправити накладеним платежем', callback_data: `payment_${orderId}_cash` }]
+                    ]
+                  }
+                });
+              }
+            } catch(e) {
+              console.error('TON timer error:', e);
+            }
+          }, 10 * 60 * 1000); // 10 минут
         }
 
         await bot.answerCallbackQuery(callbackQuery.id);
