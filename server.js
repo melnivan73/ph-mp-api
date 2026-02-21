@@ -52,6 +52,48 @@ function getSheetsAuth() {
   }
 }
 
+async function updateOrderInSheets(orderId, updates) {
+  try {
+    const auth = getSheetsAuth();
+    if (!auth) return;
+    const sheets = google.sheets({ version: 'v4', auth });
+
+    // Находим строку с нужным orderId
+    const res = await sheets.spreadsheets.values.get({
+      spreadsheetId: SPREADSHEET_ID,
+      range: `${ORDERS_SHEET}!A:J`,
+    });
+    const rows = res.data.values || [];
+    const rowIndex = rows.findIndex(r => r[1] === orderId);
+    if (rowIndex === -1) return;
+
+    const rowNum = rowIndex + 1; // 1-based
+
+    // Обновляем нужные колонки
+    if (updates.status) {
+      await sheets.spreadsheets.values.update({
+        spreadsheetId: SPREADSHEET_ID,
+        range: `${ORDERS_SHEET}!I${rowNum}`,
+        valueInputOption: 'RAW',
+        requestBody: { values: [[updates.status]] }
+      });
+    }
+    if (updates.deliveryData) {
+      const d = updates.deliveryData;
+      const deliveryStr = Object.entries(d).map(([k,v]) => `${k}: ${v}`).join(', ');
+      await sheets.spreadsheets.values.update({
+        spreadsheetId: SPREADSHEET_ID,
+        range: `${ORDERS_SHEET}!J${rowNum}`,
+        valueInputOption: 'RAW',
+        requestBody: { values: [[deliveryStr]] }
+      });
+    }
+    console.log('✅ Order updated in Sheets:', orderId);
+  } catch(e) {
+    console.error('Sheets update error:', e.message);
+  }
+}
+
 // Получить заказ: сначала из памяти, потом из Sheets
 async function getOrder(orderId) {
   let order = activeOrders.get(orderId);
@@ -599,6 +641,12 @@ app.post('/api/delivery-data', async (req, res) => {
     order.deliveryData = deliveryData;
     activeOrders.set(orderId, order);
 
+    // Обновляем данные доставки в Sheets
+    updateOrderInSheets(orderId, { 
+      deliveryData, 
+      status: paymentType === 'cash' ? 'накладений платіж' : 'TON оплата'
+    }).catch(e => console.error('Sheets:', e));
+
     // Если выбрана оплата наличными - сразу обрабатываем
     if (paymentType === 'cash') {
       const phonesList = order.phones.map(p => p.number).join(', ');
@@ -841,6 +889,9 @@ ${Object.entries(deliveryData).map(([key, value]) => `${key}: ${value}`).join('\
           '✅ Оплата підтверджена!\n\n' +
           'Ваше замовлення прийнято. Менеджер зв\'яжеться з вами найближчим часом.'
         );
+
+        // Обновляем статус в Sheets
+        updateOrderInSheets(orderId, { status: 'оплачено TON' }).catch(e => console.error('Sheets:', e));
 
         // НЕ удаляем заказ - сохраняем историю
         // activeOrders.delete(orderId);
@@ -1130,6 +1181,9 @@ ${Object.entries(deliveryData).map(([key, value]) => `${key}: ${value}`).join('\
             '✅ Ваше замовлення прийняте.\n\n' +
             'З вами можуть додатково зв\'язатися для уточнення даних, що відсутні (невірні)'
           );
+
+          // Обновляем статус в Sheets
+          updateOrderInSheets(orderId, { status: 'накладений платіж' }).catch(e => console.error('Sheets:', e));
 
           // НЕ удаляем заказ - сохраняем историю
           // activeOrders.delete(orderId);
