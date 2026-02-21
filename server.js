@@ -80,12 +80,19 @@ async function updateOrderInSheets(orderId, updates) {
     }
     if (updates.deliveryData) {
       const d = updates.deliveryData;
-      const deliveryStr = Object.entries(d).map(([k,v]) => `${k}: ${v}`).join(', ');
       await sheets.spreadsheets.values.update({
         spreadsheetId: SPREADSHEET_ID,
-        range: `${ORDERS_SHEET}!J${rowNum}`,
+        range: `${ORDERS_SHEET}!J${rowNum}:P${rowNum}`,
         valueInputOption: 'RAW',
-        requestBody: { values: [[deliveryStr]] }
+        requestBody: { values: [[
+          d['Телефон'] || '',
+          d['Прізвище'] || '',
+          d["Ім'я"] || '',
+          d['Місто'] || '',
+          d['Область'] || '',
+          d['Район'] || '',
+          d['Склад НП №'] || ''
+        ]] }
       });
     }
     console.log('✅ Order updated in Sheets:', orderId);
