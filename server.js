@@ -1068,7 +1068,7 @@ ${Object.entries(deliveryData).map(([key, value]) => `${key}: ${value}`).join('\
               inline_keyboard: [
                 [{ 
                   text: '💎 Підключити гаманець та оплатити', 
-                  web_app: { url: `https://ph-mp.vercel.app/ton-payment.html?orderId=${orderId}` }
+                  web_app: { url: `https://ph-mp.vercel.app/ton-payment.html?orderId=${orderId}&phones=${encodeURIComponent(order.phones.map(p=>p.number).join(','))}&totalUah=${order.totalUah}&totalTon=${order.totalTonWithDiscount}&tonRate=${order.tonRate}` }
                 }]
               ]
             }
