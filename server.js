@@ -65,7 +65,12 @@ async function updateOrderInSheets(orderId, updates) {
     });
     const rows = res.data.values || [];
     const rowIndex = rows.findIndex(r => r[1] === orderId);
-    if (rowIndex === -1) return;
+    console.log(`🔍 Sheets search: orderId=${orderId}, rowIndex=${rowIndex}, total rows=${rows.length}`);
+    if (rowIndex === -1) {
+      console.error('❌ Order not found in Sheets:', orderId);
+      console.log('Available orderIds:', rows.slice(1).map(r => r[1]));
+      return;
+    }
 
     const rowNum = rowIndex + 1; // 1-based
 
@@ -652,7 +657,8 @@ app.post('/api/delivery-data', async (req, res) => {
     updateOrderInSheets(orderId, { 
       deliveryData, 
       status: paymentType === 'cash' ? 'накладений платіж' : 'TON оплата'
-    }).catch(e => console.error('Sheets:', e));
+    }).then(() => console.log('✅ Sheets updated for', orderId))
+      .catch(e => console.error('❌ Sheets update failed:', e.message, e.stack));
 
     // Если выбрана оплата наличными - сразу обрабатываем
     if (paymentType === 'cash') {
