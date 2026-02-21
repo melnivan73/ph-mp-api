@@ -832,52 +832,46 @@ app.post('/api/ton-payment-cancelled', async (req, res) => {
     console.log('Body:', req.body);
     console.log('Content-Type:', req.headers['content-type']);
     
-    const { orderId } = req.body;
+    const { orderId, phones, totalUah, username: bodyUsername, userId: bodyUserId } = req.body;
     
     if (!orderId) {
       console.error('❌ No orderId in request');
-      return res.status(400).json({
-        success: false,
-        error: 'orderId не вказано'
-      });
+      return res.status(400).json({ success: false, error: 'orderId не вказано' });
     }
     
+    // Берём заказ из памяти или из данных запроса (Vercel serverless может не иметь заказа в памяти)
     const order = activeOrders.get(orderId);
-    
-    if (!order) {
-      console.error('❌ Order not found:', orderId);
-      return res.status(404).json({
-        success: false,
-        error: 'Замовлення не знайдено'
-      });
-    }
+    const orderPhones = order ? order.phones : (phones || []);
+    const orderTotalUah = order ? order.totalUah : (totalUah || 0);
+    const orderUsername = order ? order.username : (bodyUsername || 'невідомий');
+    const orderUserId = order ? order.userId : (bodyUserId || null);
 
-    const phonesList = order.phones.map(p => p.number).join(', ');
+    const phonesList = orderPhones.map(p => p.number).join(', ') || 'невідомо';
 
     console.log('📤 Sending messages to admin and client...');
 
     // Уведомляем админа
     await bot.sendMessage(ADMIN_ID,
-      `⚠️ Клієнт @${order.username} (ID: ${order.userId}) скасував оплату TON`
+      `⚠️ Клієнт @${orderUsername} (ID: ${orderUserId}) скасував оплату TON`
     );
 
-    // Отправляем клиенту сообщение с кнопкой оплаты при получении
-    const cancelMessage = `❌ Ви скасували оплату TON
+    // Отправляем клиенту кнопку оплаты при получении (только если знаем userId)
+    if (orderUserId) {
+      const cancelMessage = `❌ Недостатньо коштів або скасовано оплату TON
 
 📱 Номер: ${phonesList}
-💰 Сума: ${order.totalUah.toLocaleString('uk-UA')} грн.
+💰 Сума: ${orderTotalUah.toLocaleString ? orderTotalUah.toLocaleString('uk-UA') : orderTotalUah} грн.
 
 Ви можете оплатити при отриманні:`;
 
-    await bot.sendMessage(order.userId, cancelMessage, {
-      reply_markup: {
-        inline_keyboard: [
-          [
-            { text: '💵 Оплата при отриманні', callback_data: `payment_${orderId}_cash` }
+      await bot.sendMessage(orderUserId, cancelMessage, {
+        reply_markup: {
+          inline_keyboard: [
+            [{ text: '💵 Відправити накладеним платежем', callback_data: `payment_${orderId}_cash` }]
           ]
-        ]
-      }
-    });
+        }
+      });
+    }
 
     console.log('✅ Messages sent successfully');
 
@@ -1068,7 +1062,7 @@ ${Object.entries(deliveryData).map(([key, value]) => `${key}: ${value}`).join('\
               inline_keyboard: [
                 [{ 
                   text: '💎 Підключити гаманець та оплатити', 
-                  web_app: { url: `https://ph-mp.vercel.app/ton-payment.html?orderId=${orderId}&phones=${encodeURIComponent(order.phones.map(p=>p.number).join(','))}&totalUah=${order.totalUah}&totalTon=${order.totalTonWithDiscount}&tonRate=${order.tonRate}` }
+                  web_app: { url: `https://ph-mp.vercel.app/ton-payment.html?orderId=${orderId}&phones=${encodeURIComponent(order.phones.map(p=>p.number).join(','))}&totalUah=${order.totalUah}&totalTon=${order.totalTonWithDiscount}&tonRate=${order.tonRate}&userId=${order.userId || ''}&username=${encodeURIComponent(order.username || '')}` }
                 }]
               ]
             }
