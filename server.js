@@ -28,11 +28,101 @@ const BOT_TOKEN = process.env.TELEGRAM_BOT_TOKEN;
 const ADMIN_ID = process.env.ADMIN_TELEGRAM_ID;
 const bot = new TelegramBot(BOT_TOKEN);
 
-// Хранилище заказов (в продакшене использовать БД)
+// Хранилище заказов — Map в памяти (быстро) + Google Sheets (постоянно)
 const activeOrders = new Map();
-
-// Хранилище TON транзакций
 const tonTransactions = new Map();
+
+// ========================================
+// GOOGLE SHEETS — ХРАНИЛИЩЕ ЗАКАЗОВ
+// ========================================
+
+const ORDERS_SHEET = 'orders';
+
+function getSheetsAuth() {
+  if (!process.env.GOOGLE_SERVICE_ACCOUNT_JSON) return null;
+  try {
+    const credentials = JSON.parse(process.env.GOOGLE_SERVICE_ACCOUNT_JSON);
+    return new google.auth.GoogleAuth({
+      credentials,
+      scopes: ['https://www.googleapis.com/auth/spreadsheets']
+    });
+  } catch(e) {
+    console.error('Sheets auth error:', e.message);
+    return null;
+  }
+}
+
+// Получить заказ: сначала из памяти, потом из Sheets
+async function getOrder(orderId) {
+  let order = activeOrders.get(orderId);
+  if (order) return order;
+  // Fallback на Sheets если инстанс перезапустился
+  order = await getOrderFromSheets(orderId);
+  if (order) {
+    activeOrders.set(orderId, order); // кэшируем
+    console.log('✅ Order restored from Sheets:', orderId);
+  }
+  return order;
+}
+
+async function saveOrderToSheets(order) {
+  try {
+    const auth = getSheetsAuth();
+    if (!auth) return;
+    const sheets = google.sheets({ version: 'v4', auth });
+    const now = new Date().toLocaleString('uk-UA', { timeZone: 'Europe/Kiev' });
+    const phonesList = order.phones.map(p => p.number).join(', ');
+    await sheets.spreadsheets.values.append({
+      spreadsheetId: SPREADSHEET_ID,
+      range: `${ORDERS_SHEET}!A:I`,
+      valueInputOption: 'RAW',
+      requestBody: {
+        values: [[
+          now,
+          order.orderId,
+          order.username || 'невідомий',
+          String(order.userId || ''),
+          phonesList,
+          order.totalUah,
+          order.totalTonWithDiscount,
+          order.tonRate,
+          'новий'
+        ]]
+      }
+    });
+    console.log('✅ Order saved to Sheets');
+  } catch(e) {
+    console.error('Sheets save error:', e.message);
+  }
+}
+
+async function getOrderFromSheets(orderId) {
+  try {
+    const auth = getSheetsAuth();
+    if (!auth) return null;
+    const sheets = google.sheets({ version: 'v4', auth });
+    const res = await sheets.spreadsheets.values.get({
+      spreadsheetId: SPREADSHEET_ID,
+      range: `${ORDERS_SHEET}!A:I`,
+    });
+    const rows = res.data.values || [];
+    const row = rows.find(r => r[1] === orderId);
+    if (!row) return null;
+    // Восстанавливаем объект заказа из строки
+    return {
+      orderId: row[1],
+      username: row[2],
+      userId: row[3] ? Number(row[3]) : null,
+      phones: row[4].split(', ').map(n => ({ number: n })),
+      totalUah: Number(row[5]),
+      totalTonWithDiscount: Number(row[6]),
+      tonRate: Number(row[7])
+    };
+  } catch(e) {
+    console.error('Sheets get error:', e.message);
+    return null;
+  }
+}
 
 // Кэш курса TON
 let tonRateCache = {
@@ -266,7 +356,7 @@ app.post('/api/order', async (req, res) => {
     const orderId = crypto.randomBytes(8).toString('hex');
 
     // Сохраняем заказ
-    activeOrders.set(orderId, {
+    const orderObj = {
       orderId,
       phones,
       totalUah,
@@ -275,7 +365,10 @@ app.post('/api/order', async (req, res) => {
       tonRate,
       username: username || 'невідомий',
       userId
-    });
+    };
+    activeOrders.set(orderId, orderObj);
+    // Сохраняем в Sheets асинхронно
+    saveOrderToSheets(orderObj).catch(e => console.error('Sheets:', e));
 
     // Форматирование списка номеров
     const phonesList = phones.map(p => 
@@ -483,7 +576,7 @@ app.post('/api/delivery-data', async (req, res) => {
       });
     }
 
-    const order = activeOrders.get(orderId);
+    const order = await getOrder(orderId);
     
     if (!order) {
       return res.status(404).json({
@@ -590,7 +683,7 @@ const MERCHANT_WALLET = 'UQA3soK4ABEWcsjblRdxW2bBd8Wgfli4WjURqr4p3s-eHpx5';
 // Функция проверки транзакции TON
 async function checkTonTransaction(orderId) {
   try {
-    const order = activeOrders.get(orderId);
+    const order = await getOrder(orderId);
     if (!order) return { found: false };
 
     const txData = tonTransactions.get(orderId);
@@ -657,7 +750,7 @@ async function checkTonTransaction(orderId) {
 app.get('/api/order-details/:orderId', async (req, res) => {
   try {
     const { orderId } = req.params;
-    const order = activeOrders.get(orderId);
+    const order = await getOrder(orderId);
     
     if (!order) {
       return res.status(404).json({
@@ -717,7 +810,7 @@ app.get('/api/check-ton-payment/:orderId', async (req, res) => {
     
     if (txResult.found) {
       // Транзакция найдена - уведомляем админа
-      const order = activeOrders.get(orderId);
+      const order = await getOrder(orderId);
       
       if (order && !tonTransactions.get(orderId)?.confirmed) {
         tonTransactions.set(orderId, {
@@ -778,7 +871,7 @@ ${Object.entries(deliveryData).map(([key, value]) => `${key}: ${value}`).join('\
 app.post('/api/cancel-order', async (req, res) => {
   try {
     const { orderId } = req.body;
-    const order = activeOrders.get(orderId);
+    const order = await getOrder(orderId);
     
     if (!order) {
       return res.status(404).json({
@@ -840,7 +933,7 @@ app.post('/api/ton-payment-cancelled', async (req, res) => {
     }
     
     // Берём заказ из памяти или из данных запроса (Vercel serverless может не иметь заказа в памяти)
-    const order = activeOrders.get(orderId);
+    const order = await getOrder(orderId);
     const orderPhones = order ? order.phones : (phones || []);
     const orderTotalUah = order ? order.totalUah : (totalUah || 0);
     const orderUsername = order ? order.username : (bodyUsername || 'невідомий');
@@ -889,7 +982,7 @@ app.post('/api/ton-payment-cancelled', async (req, res) => {
 app.post('/api/pay-by-cash', async (req, res) => {
   try {
     const { orderId } = req.body;
-    const order = activeOrders.get(orderId);
+    const order = await getOrder(orderId);
     
     if (!order) {
       return res.status(404).json({
@@ -948,7 +1041,7 @@ app.post('/api/telegram-webhook', async (req, res) => {
       const callbackQuery = update.callback_query;
       const data = callbackQuery.data;
       const [action, orderId] = data.split('_');
-      const order = activeOrders.get(orderId);
+      const order = await getOrder(orderId);
 
       if (!order) {
         await bot.answerCallbackQuery(callbackQuery.id, {
@@ -1084,7 +1177,7 @@ ${Object.entries(deliveryData).map(([key, value]) => `${key}: ${value}`).join('\
           // Таймер 10 минут — если TON оплата не пришла, отправляем кнопку наложенного платежа
           setTimeout(async () => {
             try {
-              const currentOrder = activeOrders.get(orderId);
+              const currentOrder = await getOrder(orderId);
               // Если заказ ещё не оплачен
               if (currentOrder && !currentOrder.paid) {
                 const cashOfferMessage = `⏰ Час на оплату TON минув
