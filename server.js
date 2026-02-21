@@ -653,12 +653,12 @@ app.post('/api/delivery-data', async (req, res) => {
     order.deliveryData = deliveryData;
     activeOrders.set(orderId, order);
 
-    // Обновляем данные доставки в Sheets
-    updateOrderInSheets(orderId, { 
+    // Обновляем данные доставки в Sheets ДО отправки ответа
+    await updateOrderInSheets(orderId, { 
       deliveryData, 
       status: paymentType === 'cash' ? 'накладений платіж' : 'TON оплата'
-    }).then(() => console.log('✅ Sheets updated for', orderId))
-      .catch(e => console.error('❌ Sheets update failed:', e.message, e.stack));
+    });
+    console.log('✅ Sheets updated for', orderId);
 
     // Если выбрана оплата наличными - сразу обрабатываем
     if (paymentType === 'cash') {
