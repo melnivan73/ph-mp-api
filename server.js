@@ -656,7 +656,7 @@ app.post('/api/delivery-data', async (req, res) => {
     // Обновляем данные доставки в Sheets ДО отправки ответа
     await updateOrderInSheets(orderId, { 
       deliveryData, 
-      status: paymentType === 'cash' ? 'накладений платіж' : 'TON оплата'
+      status: paymentType === 'cash' ? 'накладений платіж' : 'TON неоплачено'
     });
     console.log('✅ Sheets updated for', orderId);
 
