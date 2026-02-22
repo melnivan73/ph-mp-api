@@ -1180,8 +1180,28 @@ app.post('/api/telegram-webhook', async (req, res) => {
 
           const deliveryData = order.deliveryData || {};
           const phonesList = order.phones.map(p => p.number).join(', ');
-          
-          const adminMessage = `📦 Замовлення підтверджено (Оплата при отриманні)
+
+          // Если данных доставки нет — отправляем форму заполнения
+          if (Object.keys(deliveryData).length === 0) {
+            await bot.sendMessage(order.userId,
+              `📦 Оплата при отриманні
+
+📱 Номер: ${phonesList}
+💰 Сума: ${order.totalUah.toLocaleString('uk-UA')} грн.
+
+Будь ласка, заповніть дані для доставки:`,
+              {
+                reply_markup: {
+                  inline_keyboard: [[{
+                    text: '📝 Заповнити дані доставки',
+                    web_app: { url: `https://ph-mp.vercel.app/delivery-form.html?orderId=${orderId}` }
+                  }]]
+                }
+              }
+            );
+          } else {
+            // Данные уже есть — сразу обрабатываем
+            const adminMessage = `📦 Замовлення підтверджено (Оплата при отриманні)
 
 📱 Номер: ${phonesList}
 💰 Сума: ${order.totalUah.toLocaleString('uk-UA')} грн.
@@ -1189,17 +1209,17 @@ app.post('/api/telegram-webhook', async (req, res) => {
 👤 Замовник: @${order.username} (ID: ${order.userId})
 
 📮 Дані для відправки:
-${Object.entries(deliveryData).map(([key, value]) => `${key}: ${value}`).join('\n')}`;
+${Object.entries(deliveryData).map(([key, value]) => `${key}: ${value}`).join('
+')}`;
 
-          await bot.sendMessage(ADMIN_ID, adminMessage);
+            await bot.sendMessage(ADMIN_ID, adminMessage);
+            await bot.sendMessage(order.userId,
+              '✅ Ваше замовлення прийняте.
 
-          await bot.sendMessage(order.userId, 
-            '✅ Ваше замовлення прийняте.\n\n' +
-            'З вами можуть додатково зв\'язатися для уточнення даних, що відсутні (невірні)'
-          );
-
-          // Обновляем статус в Sheets
-          updateOrderInSheets(orderId, { status: 'накладений платіж' }).catch(e => console.error('Sheets:', e));
+З вами можуть додатково зв'язатися для уточнення даних.'
+            );
+            await updateOrderInSheets(orderId, { status: 'накладений платіж' });
+          }
 
           // НЕ удаляем заказ - сохраняем историю
           // activeOrders.delete(orderId);
