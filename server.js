@@ -857,7 +857,8 @@ app.post('/api/ton-test-confirm', async (req, res) => {
     await bot.sendMessage(ADMIN_ID,
       '💎 Замовлення підтверджено (Оплата TON)\n\n' +
       '📱 Номер: ' + phonesList + '\n' +
-      '💰 Сума: ' + order.totalUah.toLocaleString('uk-UA') + ' грн.\n\n' +
+      '💰 Сума: ' + order.totalUah.toLocaleString('uk-UA') + ' грн.\n' +
+      '💎 Оплачено: ' + order.totalTonWithDiscount + ' TON\n\n' +
       '👤 Замовник: @' + order.username + ' (ID: ' + order.userId + ')\n' +
       deliveryStr
     );
