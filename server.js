@@ -841,6 +841,32 @@ app.get('/api/order-details/:orderId', async (req, res) => {
 });
 
 // Уведомление о TON транзакции
+// ТЕСТ: подтверждение TON оплаты без реальной транзакции (убрать после проверки)
+app.post('/api/ton-test-confirm', async (req, res) => {
+  try {
+    const { orderId } = req.body;
+    const order = await getOrder(orderId);
+    if (!order) return res.json({ success: false, error: 'Order not found' });
+
+    const phonesList = order.phones.map(p => p.number).join(', ');
+
+    await bot.sendMessage(ADMIN_ID,
+      `✅ [ТЕСТ] Оплата TON підтверджена!\n\n📱 Номер: ${phonesList}\n💰 Сума: ${order.totalUah} грн.\n\n👤 Замовник: @${order.username}`
+    );
+
+    await bot.sendMessage(order.userId,
+      '✅ Оплата підтверджена!\n\nВаше замовлення прийнято. Менеджер зв\'яжеться з вами найближчим часом.'
+    );
+
+    await updateOrderInSheets(orderId, { status: 'оплачено TON' });
+
+    res.json({ success: true });
+  } catch(e) {
+    console.error('ton-test-confirm error:', e);
+    res.json({ success: false, error: e.message });
+  }
+});
+
 app.post('/api/ton-payment-attempt', async (req, res) => {
   try {
     const { orderId } = req.body;
