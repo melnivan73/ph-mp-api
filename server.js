@@ -850,8 +850,16 @@ app.post('/api/ton-test-confirm', async (req, res) => {
 
     const phonesList = order.phones.map(p => p.number).join(', ');
 
+    const deliveryData = order.deliveryData || {};
+    const deliveryStr = Object.keys(deliveryData).length > 0
+      ? '\n📮 Дані для відправки:\n' + Object.entries(deliveryData).map(([k, v]) => k + ': ' + v).join('\n')
+      : '';
     await bot.sendMessage(ADMIN_ID,
-      `✅ [ТЕСТ] Оплата TON підтверджена!\n\n📱 Номер: ${phonesList}\n💰 Сума: ${order.totalUah} грн.\n\n👤 Замовник: @${order.username}`
+      '💎 Замовлення підтверджено (Оплата TON)\n\n' +
+      '📱 Номер: ' + phonesList + '\n' +
+      '💰 Сума: ' + order.totalUah.toLocaleString('uk-UA') + ' грн.\n\n' +
+      '👤 Замовник: @' + order.username + ' (ID: ' + order.userId + ')\n' +
+      deliveryStr
     );
 
     await bot.sendMessage(order.userId,
@@ -957,7 +965,7 @@ ${Object.entries(deliveryData).map(([key, value]) => `${key}: ${value}`).join('\
         );
 
         // Обновляем статус в Sheets
-        updateOrderInSheets(orderId, { status: 'оплачено TON' }).catch(e => console.error('Sheets:', e));
+        await updateOrderInSheets(orderId, { status: 'оплачено TON' });
 
         // НЕ удаляем заказ - сохраняем историю
         // activeOrders.delete(orderId);
