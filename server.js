@@ -774,31 +774,17 @@ async function checkTonTransaction(orderId) {
                   const txTime = tx.utime * 1000; // Конвертируем в milliseconds
                   
                   // Проверяем:
-                  // 1. Комментарий содержит orderId (приоритет)
-                  // 2. Сумма совпадает (допуск ±2%)
-                  // 3. Транзакция после создания заказа
+                  // 1. Сумма совпадает (допуск ±2%)
+                  // 2. Транзакция после создания заказа
                   const amountDiff = Math.abs(amount - expectedAmount) / expectedAmount;
-                  const isAfterOrder = txTime >= (txTimestamp - 60000);
-
-                  // Извлекаем комментарий из транзакции
-                  let txComment = '';
-                  try {
-                    if (tx.in_msg && tx.in_msg.msg_data && tx.in_msg.msg_data.text) {
-                      txComment = Buffer.from(tx.in_msg.msg_data.text, 'base64').toString('utf8').slice(4);
-                    }
-                  } catch(e) {}
-
-                  const commentMatch = txComment.includes(orderId);
-                  const amountMatch = amountDiff < 0.02;
-
-                  // Принимаем если: комментарий совпадает ИЛИ (сумма + время)
-                  if ((commentMatch && amountMatch) || (amountMatch && isAfterOrder && !txComment)) {
+                  const isAfterOrder = txTime >= (txTimestamp - 60000); // с запасом 1 минута
+                  
+                  if (amountDiff < 0.02 && isAfterOrder) {
                     return resolve({
                       found: true,
                       txHash: tx.transaction_id.hash,
                       amount: amount / 1000000000,
-                      timestamp: tx.utime,
-                      commentMatch
+                      timestamp: tx.utime
                     });
                   }
                 }
@@ -918,7 +904,7 @@ ${Object.entries(deliveryData).map(([key, value]) => `${key}: ${value}`).join('\
         );
 
         // Обновляем статус в Sheets
-        await updateOrderInSheets(orderId, { status: 'оплачено TON' });
+        updateOrderInSheets(orderId, { status: 'оплачено TON' }).catch(e => console.error('Sheets:', e));
 
         // НЕ удаляем заказ - сохраняем историю
         // activeOrders.delete(orderId);
