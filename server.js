@@ -841,6 +841,33 @@ app.get('/api/order-details/:orderId', async (req, res) => {
 });
 
 // Уведомление о TON транзакции
+app.post('/api/ton-payment-attempt', async (req, res) => {
+  try {
+    const { orderId } = req.body;
+    const order = await getOrder(orderId);
+    if (!order) return res.json({ success: false });
+
+    const phonesList = order.phones.map(p => p.number).join(', ');
+
+    // Отправляем клиенту кнопку на случай если не хватит средств
+    await bot.sendMessage(order.userId,
+      `💳 Ви перейшли до оплати TON\n\n📱 Номер: ${phonesList}\n\nЯкщо виникли проблеми з оплатою — оберіть накладений платіж:`,
+      {
+        reply_markup: {
+          inline_keyboard: [[
+            { text: '💵 Оплата при отриманні', callback_data: `payment_${orderId}_cash` }
+          ]]
+        }
+      }
+    );
+
+    res.json({ success: true });
+  } catch(e) {
+    console.error('ton-payment-attempt error:', e);
+    res.json({ success: false });
+  }
+});
+
 app.post('/api/ton-transaction', async (req, res) => {
   try {
     const { orderId, boc, wallet } = req.body;
