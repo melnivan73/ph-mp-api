@@ -918,7 +918,7 @@ ${Object.entries(deliveryData).map(([key, value]) => `${key}: ${value}`).join('\
         );
 
         // Обновляем статус в Sheets
-        updateOrderInSheets(orderId, { status: 'оплачено TON' }).catch(e => console.error('Sheets:', e));
+        await updateOrderInSheets(orderId, { status: 'оплачено TON' });
 
         // НЕ удаляем заказ - сохраняем историю
         // activeOrders.delete(orderId);
