@@ -1201,22 +1201,16 @@ app.post('/api/telegram-webhook', async (req, res) => {
             );
           } else {
             // Данные уже есть — сразу обрабатываем
-            const adminMessage = `📦 Замовлення підтверджено (Оплата при отриманні)
-
-📱 Номер: ${phonesList}
-💰 Сума: ${order.totalUah.toLocaleString('uk-UA')} грн.
-
-👤 Замовник: @${order.username} (ID: ${order.userId})
-
-📮 Дані для відправки:
-${Object.entries(deliveryData).map(([key, value]) => `${key}: ${value}`).join('
-')}`;
+            const deliveryStr = Object.entries(deliveryData).map(([k, v]) => k + ': ' + v).join('\n');
+            const adminMessage = '📦 Замовлення підтверджено (Оплата при отриманні)\n\n' +
+              '📱 Номер: ' + phonesList + '\n' +
+              '💰 Сума: ' + order.totalUah.toLocaleString('uk-UA') + ' грн.\n\n' +
+              '👤 Замовник: @' + order.username + ' (ID: ' + order.userId + ')\n\n' +
+              '📮 Дані для відправки:\n' + deliveryStr;
 
             await bot.sendMessage(ADMIN_ID, adminMessage);
             await bot.sendMessage(order.userId,
-              '✅ Ваше замовлення прийняте.
-
-З вами можуть додатково зв'язатися для уточнення даних.'
+              '✅ Ваше замовлення прийняте.\n\nЗ вами можуть додатково зв\'язатися для уточнення даних.'
             );
             await updateOrderInSheets(orderId, { status: 'накладений платіж' });
           }
