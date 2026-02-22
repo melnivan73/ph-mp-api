@@ -774,17 +774,31 @@ async function checkTonTransaction(orderId) {
                   const txTime = tx.utime * 1000; // Конвертируем в milliseconds
                   
                   // Проверяем:
-                  // 1. Сумма совпадает (допуск ±2%)
-                  // 2. Транзакция после создания заказа
+                  // 1. Комментарий содержит orderId (приоритет)
+                  // 2. Сумма совпадает (допуск ±2%)
+                  // 3. Транзакция после создания заказа
                   const amountDiff = Math.abs(amount - expectedAmount) / expectedAmount;
-                  const isAfterOrder = txTime >= (txTimestamp - 60000); // с запасом 1 минута
-                  
-                  if (amountDiff < 0.02 && isAfterOrder) {
+                  const isAfterOrder = txTime >= (txTimestamp - 60000);
+
+                  // Извлекаем комментарий из транзакции
+                  let txComment = '';
+                  try {
+                    if (tx.in_msg && tx.in_msg.msg_data && tx.in_msg.msg_data.text) {
+                      txComment = Buffer.from(tx.in_msg.msg_data.text, 'base64').toString('utf8').slice(4);
+                    }
+                  } catch(e) {}
+
+                  const commentMatch = txComment.includes(orderId);
+                  const amountMatch = amountDiff < 0.02;
+
+                  // Принимаем если: комментарий совпадает ИЛИ (сумма + время)
+                  if ((commentMatch && amountMatch) || (amountMatch && isAfterOrder && !txComment)) {
                     return resolve({
                       found: true,
                       txHash: tx.transaction_id.hash,
                       amount: amount / 1000000000,
-                      timestamp: tx.utime
+                      timestamp: tx.utime,
+                      commentMatch
                     });
                   }
                 }
